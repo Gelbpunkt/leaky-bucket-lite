@@ -1,18 +1,12 @@
-use leaky_bucket::LeakyBuckets;
+use leaky_bucket_lite::LeakyBucket;
 use std::time::{Duration, Instant};
 
 #[tokio::test]
 async fn test_issue5_a() {
-    let mut buckets = LeakyBuckets::new();
-    let coordinator = buckets.coordinate().unwrap();
-    tokio::spawn(async move { coordinator.await.unwrap() });
-
-    let rate_limiter = buckets
-        .rate_limiter()
+    let rate_limiter = LeakyBucket::builder()
         .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
-        .build()
-        .expect("LeakyBucket builder failed");
+        .build();
 
     let begin = Instant::now();
 
@@ -27,16 +21,10 @@ async fn test_issue5_a() {
 
 #[tokio::test]
 async fn test_issue5_b() {
-    let mut buckets = LeakyBuckets::new();
-    let coordinator = buckets.coordinate().unwrap();
-    tokio::spawn(async move { coordinator.await.unwrap() });
-
-    let rate_limiter = buckets
-        .rate_limiter()
+    let rate_limiter = LeakyBucket::builder()
         .refill_amount(1)
         .refill_interval(Duration::from_secs(2))
-        .build()
-        .expect("LeakyBucket builder failed");
+        .build();
 
     let begin = Instant::now();
 

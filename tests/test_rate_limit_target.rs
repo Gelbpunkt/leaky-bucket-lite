@@ -1,4 +1,4 @@
-use leaky_bucket::LeakyBuckets;
+use leaky_bucket_lite::Builder;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -7,16 +7,10 @@ use std::time::{Duration, Instant};
 /// reasonable amount of tokens at a slowish rate reaches the given target.
 #[tokio::test]
 async fn test_rate_limit_target() {
-    let mut buckets = LeakyBuckets::new();
-    let coordinator = buckets.coordinate().unwrap();
-    tokio::spawn(async move { coordinator.await.unwrap() });
-
-    let rate_limiter = buckets
-        .rate_limiter()
+    let rate_limiter = Builder::new()
         .refill_amount(50)
         .refill_interval(Duration::from_millis(200))
-        .build()
-        .expect("LeakyBucket builder failed");
+        .build();
 
     let rate_limiter = Arc::new(rate_limiter);
     let c = Arc::new(AtomicUsize::new(0));
