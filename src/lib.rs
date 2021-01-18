@@ -107,10 +107,10 @@ impl BucketActor {
                     // The point has passed, recalculate everything
                     self.last_refill = point_in_time;
                     self.tokens += self.refill_amount * (refills_needed as usize);
+                    self.tokens -= amount;
                     if self.tokens > self.max {
                         self.tokens = self.max;
                     }
-                    self.tokens -= amount;
                 }
                 let _ = respond_to.send(());
             }
@@ -296,7 +296,6 @@ impl Default for Builder {
 #[cfg(test)]
 mod tests {
     use super::Builder;
-    use futures::prelude::*;
     use std::time::{Duration, Instant};
     use tokio::time;
 
@@ -362,10 +361,17 @@ mod tests {
 
         let delay = time::sleep(Duration::from_millis(200));
 
-        let task = future::select(one.boxed(), two.boxed());
-        let task = future::select(task, delay.boxed());
+        let task = async {
+            tokio::select! {
+                _ = one => {},
+                _ = two => {},
+            }
+        };
 
-        task.await;
+        tokio::select! {
+            _ = task => {},
+            _ = delay => {},
+        }
 
         let total = one_wakeups + two_wakeups;
 
