@@ -54,10 +54,10 @@ pub type Error = oneshot::error::RecvError;
 
 struct BucketActor {
     receiver: mpsc::UnboundedReceiver<ActorMessage>,
-    tokens: usize,
-    max: usize,
+    tokens: f64,
+    max: f64,
     refill_interval: Duration,
-    refill_amount: usize,
+    refill_amount: f64,
     last_refill: Instant,
 }
 enum ActorMessage {
@@ -77,10 +77,10 @@ impl BucketActor {
     ) -> Self {
         Self {
             receiver,
-            tokens,
-            max,
+            tokens: tokens as f64,
+            max: max as f64,
             refill_interval,
-            refill_amount,
+            refill_amount: refill_amount as f64,
             last_refill: Instant::now(),
         }
     }
@@ -88,11 +88,11 @@ impl BucketActor {
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Acquire { amount, respond_to } => {
+                let amount = amount as f64;
                 let time_passed = Instant::now() - self.last_refill;
-                let refills_since =
-                    (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor() as u32;
-                self.last_refill = self.last_refill + refills_since * self.refill_interval;
-                self.tokens += refills_since as usize * self.refill_amount;
+                let refills_since = time_passed.as_secs_f64() / self.refill_interval.as_secs_f64();
+                self.last_refill = Instant::now();
+                self.tokens += refills_since * self.refill_amount;
                 if self.tokens > self.max {
                     self.tokens = self.max;
                 }
@@ -100,22 +100,14 @@ impl BucketActor {
                 if self.tokens >= amount {
                     self.tokens -= amount;
                 } else {
-                    let tokens_needed = (amount - self.tokens) as f64;
-                    let refills_needed =
-                        (tokens_needed / (self.refill_amount as f64)).ceil() as u32;
-                    let time_needed = self.refill_interval * refills_needed;
+                    let tokens_needed = amount - self.tokens;
+                    let refills_needed = tokens_needed / self.refill_amount;
+                    let target_time = Instant::now() + self.refill_interval.mul_f64(refills_needed);
 
-                    let point_in_time = self.last_refill + time_needed;
+                    sleep_until(target_time).await;
 
-                    sleep_until(point_in_time).await;
-
-                    // The point has passed, recalculate everything
-                    self.last_refill = point_in_time;
-                    self.tokens += self.refill_amount * (refills_needed as usize);
-                    self.tokens -= amount;
-                    if self.tokens > self.max {
-                        self.tokens = self.max;
-                    }
+                    self.last_refill = target_time;
+                    self.tokens = 0.0;
                 }
                 let _ = respond_to.send(());
             }
