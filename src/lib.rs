@@ -88,10 +88,18 @@ impl BucketActor {
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
             ActorMessage::Acquire { amount, respond_to } => {
+                let time_passed = Instant::now() - self.last_refill;
+                let refills_since =
+                    (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor() as u32;
+                self.last_refill = self.last_refill + refills_since * self.refill_interval;
+                self.tokens += refills_since as usize * self.refill_amount;
+                if self.tokens > self.max {
+                    self.tokens = self.max;
+                }
+
                 if self.tokens >= amount {
                     self.tokens -= amount;
                 } else {
-                    // We do not have enough tokens, calculate when we would have enough
                     let tokens_needed = (amount - self.tokens) as f64;
                     let refills_needed =
                         (tokens_needed / (self.refill_amount as f64)).ceil() as u32;
@@ -99,10 +107,7 @@ impl BucketActor {
 
                     let point_in_time = self.last_refill + time_needed;
 
-                    if point_in_time > Instant::now() {
-                        // It is in the future, so wait
-                        sleep_until(point_in_time).await;
-                    }
+                    sleep_until(point_in_time).await;
 
                     // The point has passed, recalculate everything
                     self.last_refill = point_in_time;
