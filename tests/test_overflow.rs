@@ -1,4 +1,5 @@
 use leaky_bucket_lite::LeakyBucket;
+
 use std::time::{Duration, Instant};
 
 #[tokio::test]

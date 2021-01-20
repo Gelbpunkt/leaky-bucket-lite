@@ -65,6 +65,9 @@ enum ActorMessage {
         amount: usize,
         respond_to: oneshot::Sender<()>,
     },
+    QueryTokens {
+        respond_to: oneshot::Sender<usize>,
+    },
 }
 
 impl BucketActor {
@@ -85,17 +88,26 @@ impl BucketActor {
         }
     }
 
+    #[inline]
+    fn update_tokens(&mut self) {
+        let time_passed = Instant::now() - self.last_refill;
+        let refills_since = time_passed.as_secs_f64() / self.refill_interval.as_secs_f64();
+        self.last_refill = Instant::now();
+        self.tokens += refills_since * self.refill_amount;
+        if self.tokens > self.max {
+            self.tokens = self.max;
+        }
+    }
+
     async fn handle_message(&mut self, msg: ActorMessage) {
         match msg {
+            ActorMessage::QueryTokens { respond_to } => {
+                self.update_tokens();
+                let _ = respond_to.send(self.tokens.floor() as usize);
+            }
             ActorMessage::Acquire { amount, respond_to } => {
                 let amount = amount as f64;
-                let time_passed = Instant::now() - self.last_refill;
-                let refills_since = time_passed.as_secs_f64() / self.refill_interval.as_secs_f64();
-                self.last_refill = Instant::now();
-                self.tokens += refills_since * self.refill_amount;
-                if self.tokens > self.max {
-                    self.tokens = self.max;
-                }
+                self.update_tokens();
 
                 if self.tokens >= amount {
                     self.tokens -= amount;
@@ -145,6 +157,15 @@ impl LeakyBucket {
     /// Get the max number of tokens this rate limiter is configured for.
     pub fn max(&self) -> usize {
         self.max
+    }
+
+    /// Get the current number of tokens available.
+    pub async fn tokens(&self) -> Result<usize, Error> {
+        let (send, recv) = oneshot::channel();
+        let msg = ActorMessage::QueryTokens { respond_to: send };
+
+        let _ = self.sender.send(msg);
+        recv.await
     }
 
     /// Acquire a single token.

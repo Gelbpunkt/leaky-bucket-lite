@@ -1,7 +1,12 @@
 use leaky_bucket_lite::Builder;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
 /// Test that a bunch of threads spinning on a rate limiter refilling a
 /// reasonable amount of tokens at a slowish rate reaches the given target.
