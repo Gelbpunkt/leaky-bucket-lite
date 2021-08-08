@@ -41,10 +41,8 @@ async fn test_ao_issue_2() {
     for _ in 0..4 {
         rate_limiter.acquire_one().await.expect("No reason to fail");
     }
-
     rate_limiter.acquire_one().await.expect("No reason to fail");
-
     let elapsed = Instant::now().duration_since(first_acquire);
     println!("Elapsed: {:?}", elapsed);
-    assert!(elapsed.as_millis() >= 2000 && elapsed.as_millis() <= 2050);
+    assert!((elapsed.as_secs_f64() - 1.0).abs() < 0.1);
 }

@@ -38,3 +38,20 @@ async fn test_issue5_b() {
     // once per 2 seconds => 4 seconds for 2 permits
     assert!((elapsed.as_secs_f64() - 4.).abs() < 0.1);
 }
+
+#[tokio::test]
+async fn test_issue5_c() {
+    let start = Instant::now();
+    let rate_limiter = LeakyBucket::builder()
+        .refill_amount(5.0)
+        .tokens(0.0)
+        .refill_interval(Duration::from_secs(2))
+        .build();
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    rate_limiter.acquire(7.0).await.expect("No reason to fail");
+
+    let elapsed = Instant::now().duration_since(start);
+    println!("Elapsed in c: {:?}", elapsed);
+    assert!((elapsed.as_secs_f64() - 4.).abs() < 0.1);
+}

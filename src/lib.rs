@@ -120,9 +120,11 @@ impl BucketActor {
     #[inline]
     fn update_tokens(&mut self) {
         let time_passed = Instant::now() - self.last_refill;
-        let refills_since = time_passed.as_secs_f64() / self.refill_interval.as_secs_f64();
-        self.last_refill = Instant::now();
-        self.tokens += refills_since * self.refill_amount;
+        let refills_since =
+            (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor();
+        self.tokens += self.refill_amount * refills_since;
+        self.last_refill += self.refill_interval.mul_f64(refills_since);
+
         if self.tokens > self.max {
             self.tokens = self.max;
         }
@@ -138,18 +140,18 @@ impl BucketActor {
                 let amount = amount as f64;
                 self.update_tokens();
 
-                if self.tokens >= amount {
-                    self.tokens -= amount;
-                } else {
+                if self.tokens < amount {
                     let tokens_needed = amount - self.tokens;
-                    let refills_needed = tokens_needed / self.refill_amount;
-                    let target_time = Instant::now() + self.refill_interval.mul_f64(refills_needed);
+                    let refills_needed = (tokens_needed / self.refill_amount).ceil();
+                    let target_time =
+                        self.last_refill + self.refill_interval.mul_f64(refills_needed);
 
                     sleep_until(target_time).await;
 
-                    self.last_refill = target_time;
-                    self.tokens = 0.0;
+                    self.update_tokens();
                 }
+
+                self.tokens -= amount;
                 let _ = respond_to.send(());
             }
         }
