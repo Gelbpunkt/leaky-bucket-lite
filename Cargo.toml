@@ -1,6 +1,6 @@
 [package]
 name = "leaky-bucket-lite"
-version = "0.1.4"
+version = "0.2.0"
 authors = ["Jens Reidel <adrian@travitia.xyz>"]
 edition = "2018"
 license = "MIT/Apache-2.0"
@@ -17,4 +17,4 @@ categories = ["algorithms", "network-programming", "concurrency"]
 tokio = { version = "1", default-features = false, features = ["time", "sync"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros"] }

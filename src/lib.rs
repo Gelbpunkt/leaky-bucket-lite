@@ -44,13 +44,40 @@
 //! ```
 //!
 //! [leaky bucket]: https://en.wikipedia.org/wiki/Leaky_bucket
+use std::fmt;
 use tokio::{
     sync::{mpsc, oneshot},
     time::{sleep_until, Duration, Instant},
 };
 
 /// Error type used in this crate.
-pub type Error = oneshot::error::RecvError;
+#[derive(Debug)]
+pub enum Error {
+    /// Sending a message to the actor has failed because the runtime executor shut down.
+    Sending,
+    /// Receiving a message from the actor has failed because the runtime executor shut down.
+    Receiving,
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.write_str("runtime executor shut down")
+    }
+}
+
+impl From<mpsc::error::SendError<ActorMessage>> for Error {
+    fn from(_: mpsc::error::SendError<ActorMessage>) -> Self {
+        Self::Sending
+    }
+}
+
+impl From<oneshot::error::RecvError> for Error {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        Self::Receiving
+    }
+}
 
 struct BucketActor {
     receiver: mpsc::UnboundedReceiver<ActorMessage>,
@@ -60,30 +87,32 @@ struct BucketActor {
     refill_amount: f64,
     last_refill: Instant,
 }
+
+#[derive(Debug)]
 enum ActorMessage {
     Acquire {
-        amount: usize,
+        amount: f64,
         respond_to: oneshot::Sender<()>,
     },
     QueryTokens {
-        respond_to: oneshot::Sender<usize>,
+        respond_to: oneshot::Sender<f64>,
     },
 }
 
 impl BucketActor {
     fn new(
-        max: usize,
-        tokens: usize,
+        max: f64,
+        tokens: f64,
         refill_interval: Duration,
-        refill_amount: usize,
+        refill_amount: f64,
         receiver: mpsc::UnboundedReceiver<ActorMessage>,
     ) -> Self {
         Self {
             receiver,
-            tokens: tokens as f64,
-            max: max as f64,
+            tokens,
+            max,
             refill_interval,
-            refill_amount: refill_amount as f64,
+            refill_amount,
             last_refill: Instant::now(),
         }
     }
@@ -103,7 +132,7 @@ impl BucketActor {
         match msg {
             ActorMessage::QueryTokens { respond_to } => {
                 self.update_tokens();
-                let _ = respond_to.send(self.tokens.floor() as usize);
+                let _ = respond_to.send(self.tokens);
             }
             ActorMessage::Acquire { amount, respond_to } => {
                 let amount = amount as f64;
@@ -137,11 +166,11 @@ async fn run_bucket_actor(mut actor: BucketActor) {
 #[derive(Clone, Debug)]
 pub struct LeakyBucket {
     sender: mpsc::UnboundedSender<ActorMessage>,
-    max: usize,
+    max: f64,
 }
 
 impl LeakyBucket {
-    fn new(max: usize, tokens: usize, refill_interval: Duration, refill_amount: usize) -> Self {
+    fn new(max: f64, tokens: f64, refill_interval: Duration, refill_amount: f64) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let actor = BucketActor::new(max, tokens, refill_interval, refill_amount, receiver);
         tokio::spawn(run_bucket_actor(actor));
@@ -150,22 +179,30 @@ impl LeakyBucket {
     }
 
     /// Construct a new leaky bucket through a builder.
+    #[must_use]
     pub fn builder() -> Builder {
         Builder::new()
     }
 
     /// Get the max number of tokens this rate limiter is configured for.
-    pub fn max(&self) -> usize {
+    #[must_use]
+    pub fn max(&self) -> f64 {
         self.max
     }
 
     /// Get the current number of tokens available.
-    pub async fn tokens(&self) -> Result<usize, Error> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` when communicating with the actor fails.
+    pub async fn tokens(&self) -> Result<f64, Error> {
         let (send, recv) = oneshot::channel();
         let msg = ActorMessage::QueryTokens { respond_to: send };
 
-        let _ = self.sender.send(msg);
-        recv.await
+        self.sender.send(msg)?;
+        let tokens = recv.await?;
+
+        Ok(tokens)
     }
 
     /// Acquire a single token.
@@ -197,9 +234,13 @@ impl LeakyBucket {
     ///     Ok(())
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` when communicating with the actor fails.
     #[inline]
     pub async fn acquire_one(&self) -> Result<(), Error> {
-        self.acquire(1).await
+        self.acquire(1.0).await
     }
 
     /// Acquire the given `amount` of tokens.
@@ -227,29 +268,36 @@ impl LeakyBucket {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn acquire(&self, amount: usize) -> Result<(), Error> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error` when communicating with the actor fails.
+    pub async fn acquire(&self, amount: f64) -> Result<(), Error> {
         let (send, recv) = oneshot::channel();
         let msg = ActorMessage::Acquire {
             amount,
             respond_to: send,
         };
 
-        let _ = self.sender.send(msg);
-        recv.await
+        self.sender.send(msg)?;
+        recv.await?;
+
+        Ok(())
     }
 }
 
 /// Builder for a leaky bucket.
 #[derive(Debug)]
 pub struct Builder {
-    max: Option<usize>,
-    tokens: Option<usize>,
+    max: Option<f64>,
+    tokens: Option<f64>,
     refill_interval: Option<Duration>,
-    refill_amount: Option<usize>,
+    refill_amount: Option<f64>,
 }
 
 impl Builder {
     /// Create a new builder with all defaults.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             max: None,
@@ -260,8 +308,8 @@ impl Builder {
     }
 
     /// Set the max value for the builder.
-    #[inline(always)]
-    pub fn max(mut self, max: usize) -> Self {
+    #[must_use]
+    pub fn max(mut self, max: f64) -> Self {
         self.max = Some(max);
         self
     }
@@ -269,32 +317,33 @@ impl Builder {
     /// The number of tokens that the bucket should start with.
     ///
     /// If set to larger than `max` at build time, will only saturate to max.
-    #[inline(always)]
-    pub fn tokens(mut self, tokens: usize) -> Self {
+    #[must_use]
+    pub fn tokens(mut self, tokens: f64) -> Self {
         self.tokens = Some(tokens);
         self
     }
 
     /// Set the max value for the builder.
-    #[inline(always)]
+    #[must_use]
     pub fn refill_interval(mut self, refill_interval: Duration) -> Self {
         self.refill_interval = Some(refill_interval);
         self
     }
 
     /// Set the refill amount to use.
-    #[inline(always)]
-    pub fn refill_amount(mut self, refill_amount: usize) -> Self {
+    #[must_use]
+    pub fn refill_amount(mut self, refill_amount: f64) -> Self {
         self.refill_amount = Some(refill_amount);
         self
     }
 
     /// Construct a new leaky bucket.
+    #[must_use]
     pub fn build(self) -> LeakyBucket {
-        const DEFAULT_MAX: usize = 120;
-        const DEFAULT_TOKENS: usize = 0;
+        const DEFAULT_MAX: f64 = 120.0;
+        const DEFAULT_TOKENS: f64 = 0.0;
         const DEFAULT_REFILL_INTERVAL: Duration = Duration::from_secs(1);
-        const DEFAULT_REFILL_AMOUNT: usize = 1;
+        const DEFAULT_REFILL_AMOUNT: f64 = 1.0;
 
         let max = self.max.unwrap_or(DEFAULT_MAX);
         let tokens = self.tokens.unwrap_or(DEFAULT_TOKENS);
@@ -322,9 +371,9 @@ mod tests {
         let interval = Duration::from_millis(20);
 
         let leaky = Builder::new()
-            .tokens(0)
-            .max(10)
-            .refill_amount(10)
+            .tokens(0.0)
+            .max(10.0)
+            .refill_amount(10.0)
             .refill_interval(interval)
             .build();
 
@@ -333,11 +382,11 @@ mod tests {
 
         let test = async {
             let start = Instant::now();
-            leaky.acquire(10).await.unwrap();
+            leaky.acquire(10.0).await.unwrap();
             wakeups += 1;
-            leaky.acquire(10).await.unwrap();
+            leaky.acquire(10.0).await.unwrap();
             wakeups += 1;
-            leaky.acquire(10).await.unwrap();
+            leaky.acquire(10.0).await.unwrap();
             wakeups += 1;
             duration = Some(Instant::now().duration_since(start));
         };
@@ -353,9 +402,9 @@ mod tests {
         let interval = Duration::from_millis(20);
 
         let leaky = Builder::new()
-            .tokens(0)
-            .max(10)
-            .refill_amount(1)
+            .tokens(0.0)
+            .max(10.0)
+            .refill_amount(1.0)
             .refill_interval(interval)
             .build();
 
@@ -363,7 +412,7 @@ mod tests {
 
         let one = async {
             loop {
-                leaky.acquire(1).await.unwrap();
+                leaky.acquire(1.0).await.unwrap();
                 one_wakeups += 1;
             }
         };
@@ -372,7 +421,7 @@ mod tests {
 
         let two = async {
             loop {
-                leaky.acquire(1).await.unwrap();
+                leaky.acquire(1.0).await.unwrap();
                 two_wakeups += 1;
             }
         };

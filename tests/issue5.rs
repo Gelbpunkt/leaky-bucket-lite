@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 async fn test_issue5_a() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(1)
+        .refill_amount(1.0)
         .refill_interval(Duration::from_millis(100))
         .build();
 
@@ -23,7 +23,7 @@ async fn test_issue5_a() {
 #[tokio::test]
 async fn test_issue5_b() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(1)
+        .refill_amount(1.0)
         .refill_interval(Duration::from_secs(2))
         .build();
 

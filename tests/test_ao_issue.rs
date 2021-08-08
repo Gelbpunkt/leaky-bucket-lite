@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 async fn test_ao_issue() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(1)
+        .refill_amount(1.0)
         .refill_interval(Duration::from_secs(2))
-        .max(5)
-        .tokens(5)
+        .max(5.0)
+        .tokens(5.0)
         .build();
 
     let begin = Instant::now();
@@ -27,10 +27,10 @@ async fn test_ao_issue() {
 #[tokio::test]
 async fn test_ao_issue_2() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(1)
+        .refill_amount(1.0)
         .refill_interval(Duration::from_secs(2))
-        .max(5)
-        .tokens(5)
+        .max(5.0)
+        .tokens(5.0)
         .build();
 
     tokio::time::sleep(Duration::from_secs(11)).await;

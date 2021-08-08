@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 async fn test_overflow() {
     let rate_limiter = LeakyBucket::builder()
-        .max(5)
-        .tokens(5)
-        .refill_amount(1)
+        .max(5.0)
+        .tokens(5.0)
+        .refill_amount(1.0)
         .refill_interval(Duration::from_millis(100))
         .build();
 
@@ -25,15 +25,15 @@ async fn test_overflow() {
 #[tokio::test]
 async fn test_overflow_2() {
     let rate_limiter = LeakyBucket::builder()
-        .max(5)
-        .tokens(5)
-        .refill_amount(1)
+        .max(5.0)
+        .tokens(5.0)
+        .refill_amount(1.0)
         .refill_interval(Duration::from_millis(100))
         .build();
 
     let begin = Instant::now();
 
-    rate_limiter.acquire(10).await.expect("No reason to fail");
+    rate_limiter.acquire(10.0).await.expect("No reason to fail");
 
     let elapsed = Instant::now().duration_since(begin);
     println!("Elapsed: {:?}", elapsed);

@@ -13,7 +13,7 @@ use std::{
 #[tokio::test]
 async fn test_rate_limit_target() {
     let rate_limiter = Builder::new()
-        .refill_amount(50)
+        .refill_amount(50.0)
         .refill_interval(Duration::from_millis(200))
         .build();
 
