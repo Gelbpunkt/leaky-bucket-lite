@@ -17,8 +17,18 @@ until the required number of tokens has been added.
 Add the following to your `Cargo.toml`:
 
 ```toml
-leaky-bucket-lite = "0.1"
+leaky-bucket-lite = "0.3"
 ```
+
+### Features
+
+leaky-bucket-lite provides 3 implementations:
+
+- `leaky_bucket_lite::LeakyBucket` (thread-safe, available via the `tokio` feature, which is on by default)
+- `leaky_bucket_lite::sync_threadsafe::LeakyBucket` (thread-safe, available via the `sync-threadsafe` feature
+- `leaky_bucket_lite::sync::LeakyBucket` (not thread-safe, available via the `sync` feature).
+
+For potential performance increase with `sync-threadsafe` using `parking_lot`'s locking objects, enable the `parking-lot` feature.
 
 ### Example
 

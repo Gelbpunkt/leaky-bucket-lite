@@ -1,4 +1,5 @@
 use leaky_bucket_lite::LeakyBucket;
+use leaky_bucket_lite::sync_threadsafe::LeakyBucket as SyncLeakyBucket;
 
 use std::time::{Duration, Instant};
 
@@ -42,6 +43,51 @@ async fn test_ao_issue_2() {
         rate_limiter.acquire_one().await.expect("No reason to fail");
     }
     rate_limiter.acquire_one().await.expect("No reason to fail");
+    let elapsed = Instant::now().duration_since(first_acquire);
+    println!("Elapsed: {:?}", elapsed);
+    assert!((elapsed.as_secs_f64() - 1.0).abs() < 0.1);
+}
+
+#[test]
+fn test_ao_issue_sync_threadsafe() {
+    let rate_limiter = SyncLeakyBucket::builder()
+        .refill_amount(1.0)
+        .refill_interval(Duration::from_secs(2))
+        .max(5.0)
+        .tokens(5.0)
+        .build();
+
+    let begin = Instant::now();
+
+    std::thread::sleep(Duration::from_secs(10));
+
+    for _ in 0..10 {
+        rate_limiter.acquire_one();
+    }
+
+    let elapsed = Instant::now().duration_since(begin);
+    println!("Elapsed: {:?}", elapsed);
+    assert!(elapsed.as_millis() >= 20000 && elapsed.as_millis() <= 20050);
+}
+
+#[test]
+fn test_ao_issue_2_sync_threadsafe() {
+    let rate_limiter = SyncLeakyBucket::builder()
+        .refill_amount(1.0)
+        .refill_interval(Duration::from_secs(2))
+        .max(5.0)
+        .tokens(5.0)
+        .build();
+
+    std::thread::sleep(Duration::from_secs(11));
+
+    rate_limiter.acquire_one();
+    let first_acquire = Instant::now();
+
+    for _ in 0..4 {
+        rate_limiter.acquire_one();
+    }
+    rate_limiter.acquire_one();
     let elapsed = Instant::now().duration_since(first_acquire);
     println!("Elapsed: {:?}", elapsed);
     assert!((elapsed.as_secs_f64() - 1.0).abs() < 0.1);

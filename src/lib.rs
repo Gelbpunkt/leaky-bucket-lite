@@ -3,26 +3,34 @@
 //! [![Crates](https://img.shields.io/crates/v/leaky-bucket-lite.svg)](https://crates.io/crates/leaky-bucket-lite)
 //! [![Actions Status](https://github.com/Gelbpunkt/leaky-bucket-lite/workflows/Rust/badge.svg)](https://github.com/Gelbpunkt/leaky-bucket-lite/actions)
 //!
-//! A token-based rate limiter based on the [leaky bucket] algorithm.
-//!
-//! The implementation is fair: Whoever acquires first will be served first.
+//! A token-based rate limiter based on the [leaky bucket] algorithm, mainly a lazy reimplementation of [udoprog's leaky-bucket] with less dependencies and overhead.
 //!
 //! If the tokens are already available, the acquisition will be instant through
 //! a fast path, and the acquired number of tokens will be added to the bucket.
 //!
-//! If they are not available, it will wait until enough tokens are available.
+//! If they aren't, the task that tried to acquire the tokens will be suspended
+//! until the required number of tokens has been added.
 //!
 //! ## Usage
 //!
 //! Add the following to your `Cargo.toml`:
 //!
 //! ```toml
-//! leaky-bucket-lite = "0.1.0"
+//! leaky-bucket-lite = "0.3"
 //! ```
+//!
+//! ## Features
+//!
+//! leaky-bucket-lite provides 3 implementations:
+//!   * [`LeakyBucket`] (thread-safe, available via the `tokio` feature, which is on by default)
+//!   * [`sync_threadsafe::LeakyBucket`] (thread-safe, available via the `sync-threadsafe` feature)
+//!   * [`sync::LeakyBucket`] (not thread-safe, available via the `sync` feature).
+//!
+//! For potential performance increase with `sync-threadsafe` using [`parking_lot`]'s locking objects, enable the `parking-lot` feature.
 //!
 //! ## Example
 //!
-//! ```no_run
+//! ```rust
 //! use leaky_bucket_lite::LeakyBucket;
 //! use std::{error::Error, time::Duration};
 //!
@@ -34,7 +42,6 @@
 //!         .refill_interval(Duration::from_secs(1))
 //!         .refill_amount(1.0)
 //!         .build();
-//!
 //!     println!("Waiting for permit...");
 //!     // should take about 5 seconds to acquire.
 //!     rate_limiter.acquire(5.0).await?;
@@ -44,9 +51,13 @@
 //! ```
 //!
 //! [leaky bucket]: https://en.wikipedia.org/wiki/Leaky_bucket
+//! [udoprog's leaky-bucket]: https://github.com/udoprog/leaky-bucket
+
 #[cfg(feature = "tokio")]
 mod tokio;
 #[cfg(feature = "tokio")]
 pub use crate::tokio::*;
 #[cfg(feature = "sync")]
 pub mod sync;
+#[cfg(feature = "sync-threadsafe")]
+pub mod sync_threadsafe;
