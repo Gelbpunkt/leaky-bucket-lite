@@ -19,7 +19,7 @@ until the required number of tokens has been added.
 Add the following to your `Cargo.toml`:
 
 ```toml
-leaky-bucket-lite = "0.3"
+leaky-bucket-lite = "0.4"
 ```
 
 ## Features
