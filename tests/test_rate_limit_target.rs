@@ -30,7 +30,7 @@ async fn test_rate_limit_target() {
 
         tasks.push(tokio::spawn(async move {
             while c.fetch_add(1, Ordering::SeqCst) < 500 {
-                rate_limiter.acquire_one().await.unwrap();
+                rate_limiter.acquire_one().await;
             }
         }));
     }

@@ -32,21 +32,21 @@
 //!
 //! ```rust
 //! use leaky_bucket_lite::LeakyBucket;
-//! use std::{error::Error, time::Duration};
+//! use std::time::Duration;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn Error>> {
+//! async fn main() {
 //!     let rate_limiter = LeakyBucket::builder()
 //!         .max(5.0)
 //!         .tokens(0.0)
 //!         .refill_interval(Duration::from_secs(1))
 //!         .refill_amount(1.0)
 //!         .build();
+//!
 //!     println!("Waiting for permit...");
 //!     // should take about 5 seconds to acquire.
-//!     rate_limiter.acquire(5.0).await?;
+//!     rate_limiter.acquire(5.0).await;
 //!     println!("I made it!");
-//!     Ok(())
 //! }
 //! ```
 //!

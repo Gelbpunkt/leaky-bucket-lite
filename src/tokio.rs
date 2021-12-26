@@ -1,137 +1,127 @@
-use std::fmt;
+#[cfg(feature = "parking-lot")]
+use parking_lot::RwLock;
+use std::sync::Arc;
+#[cfg(not(feature = "parking-lot"))]
+use std::sync::RwLock;
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::Semaphore,
     time::{sleep_until, Duration, Instant},
 };
 
-/// Error type used in this crate.
 #[derive(Debug)]
-pub enum Error {
-    /// Sending a message to the actor has failed because the runtime executor shut down.
-    Sending,
-    /// Receiving a message from the actor has failed because the runtime executor shut down.
-    Receiving,
-}
-
-impl std::error::Error for Error {}
-
-impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt.write_str("runtime executor shut down")
-    }
-}
-
-impl From<mpsc::error::SendError<ActorMessage>> for Error {
-    fn from(_: mpsc::error::SendError<ActorMessage>) -> Self {
-        Self::Sending
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        Self::Receiving
-    }
-}
-
-struct BucketActor {
-    receiver: mpsc::UnboundedReceiver<ActorMessage>,
-    tokens: f64,
+struct LeakyBucketInner {
+    /// How many tokens this bucket can hold.
     max: f64,
+    /// Interval at which the bucket gains tokens.
     refill_interval: Duration,
+    /// Amount of tokens gained per interval.
     refill_amount: f64,
-    last_refill: Instant,
+
+    /// Current tokens in the bucket.
+    tokens: RwLock<f64>,
+    /// Last refill of the tokens.
+    last_refill: RwLock<Instant>,
+
+    /// To prevent more than one task from acquiring at the same time,
+    /// a Semaphore is needed to guard access.
+    semaphore: Semaphore,
 }
 
-#[derive(Debug)]
-enum ActorMessage {
-    Acquire {
-        amount: f64,
-        respond_to: oneshot::Sender<()>,
-    },
-    QueryTokens {
-        respond_to: oneshot::Sender<f64>,
-    },
-}
-
-impl BucketActor {
-    fn new(
-        max: f64,
-        tokens: f64,
-        refill_interval: Duration,
-        refill_amount: f64,
-        receiver: mpsc::UnboundedReceiver<ActorMessage>,
-    ) -> Self {
+impl LeakyBucketInner {
+    fn new(max: f64, tokens: f64, refill_interval: Duration, refill_amount: f64) -> Self {
         Self {
-            receiver,
-            tokens,
+            tokens: RwLock::new(tokens),
             max,
             refill_interval,
             refill_amount,
-            last_refill: Instant::now(),
+            last_refill: RwLock::new(Instant::now()),
+            semaphore: Semaphore::new(1),
         }
+    }
+
+    /// Updates the tokens in the leaky bucket and returns the current amount
+    /// of tokens in the bucket.
+    #[inline]
+    fn update_tokens(&self) -> f64 {
+        #[cfg(feature = "parking-lot")]
+        let mut last_refill = self.last_refill.write();
+        #[cfg(not(feature = "parking-lot"))]
+        let mut last_refill = self.last_refill.write().expect("RwLock poisoned");
+        #[cfg(feature = "parking-lot")]
+        let mut tokens = self.tokens.write();
+        #[cfg(not(feature = "parking-lot"))]
+        let mut tokens = self.tokens.write().expect("RwLock poisoned");
+
+        let time_passed = Instant::now() - *last_refill;
+        let refills_since =
+            (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor();
+        *tokens += self.refill_amount * refills_since;
+        *last_refill += self.refill_interval.mul_f64(refills_since);
+
+        if *tokens > self.max {
+            *tokens = self.max;
+        }
+
+        *tokens
     }
 
     #[inline]
-    fn update_tokens(&mut self) {
-        let time_passed = Instant::now() - self.last_refill;
-        let refills_since =
-            (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor();
-        self.tokens += self.refill_amount * refills_since;
-        self.last_refill += self.refill_interval.mul_f64(refills_since);
-
-        if self.tokens > self.max {
-            self.tokens = self.max;
-        }
+    fn tokens(&self) -> f64 {
+        self.update_tokens()
     }
 
-    async fn handle_message(&mut self, msg: ActorMessage) {
-        match msg {
-            ActorMessage::QueryTokens { respond_to } => {
-                self.update_tokens();
-                let _ = respond_to.send(self.tokens);
-            }
-            ActorMessage::Acquire { amount, respond_to } => {
-                let amount = amount as f64;
-                self.update_tokens();
+    async fn acquire(&self, amount: f64) {
+        // Make sure this is the only task accessing the tokens in a real
+        // "write" rather than "update" way.
+        let _permit = self.semaphore.acquire().await;
 
-                if self.tokens < amount {
-                    let tokens_needed = amount - self.tokens;
-                    let refills_needed = (tokens_needed / self.refill_amount).ceil();
-                    let target_time =
-                        self.last_refill + self.refill_interval.mul_f64(refills_needed);
+        let current_tokens = self.update_tokens();
 
-                    sleep_until(target_time).await;
+        if current_tokens < amount {
+            let tokens_needed = amount - current_tokens;
+            let refills_needed = (tokens_needed / self.refill_amount).ceil();
 
-                    self.update_tokens();
-                }
+            let target_time = {
+                #[cfg(feature = "parking-lot")]
+                let last_refill = self.last_refill.read();
+                #[cfg(not(feature = "parking-lot"))]
+                let last_refill = self.last_refill.read().expect("RwLock poisoned");
 
-                self.tokens -= amount;
-                let _ = respond_to.send(());
-            }
+                *last_refill + self.refill_interval.mul_f64(refills_needed)
+            };
+
+            sleep_until(target_time).await;
+
+            self.update_tokens();
         }
-    }
-}
 
-async fn run_bucket_actor(mut actor: BucketActor) {
-    while let Some(msg) = actor.receiver.recv().await {
-        actor.handle_message(msg).await;
+        #[cfg(feature = "parking-lot")]
+        {
+            *self.tokens.write() -= amount;
+        }
+        #[cfg(not(feature = "parking-lot"))]
+        {
+            *self.tokens.write().expect("RwLock poisoned") -= amount;
+        }
     }
 }
 
 /// The leaky bucket.
 #[derive(Clone, Debug)]
 pub struct LeakyBucket {
-    sender: mpsc::UnboundedSender<ActorMessage>,
-    max: f64,
+    inner: Arc<LeakyBucketInner>,
 }
 
 impl LeakyBucket {
     fn new(max: f64, tokens: f64, refill_interval: Duration, refill_amount: f64) -> Self {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let actor = BucketActor::new(max, tokens, refill_interval, refill_amount, receiver);
-        tokio::spawn(run_bucket_actor(actor));
+        let inner = Arc::new(LeakyBucketInner::new(
+            max,
+            tokens,
+            refill_interval,
+            refill_amount,
+        ));
 
-        Self { sender, max }
+        Self { inner }
     }
 
     /// Construct a new leaky bucket through a builder.
@@ -143,22 +133,13 @@ impl LeakyBucket {
     /// Get the max number of tokens this rate limiter is configured for.
     #[must_use]
     pub fn max(&self) -> f64 {
-        self.max
+        self.inner.max
     }
 
     /// Get the current number of tokens available.
-    ///
-    /// # Errors
-    ///
-    /// Returns an `Error` when communicating with the actor fails.
-    pub async fn tokens(&self) -> Result<f64, Error> {
-        let (send, recv) = oneshot::channel();
-        let msg = ActorMessage::QueryTokens { respond_to: send };
-
-        self.sender.send(msg)?;
-        let tokens = recv.await?;
-
-        Ok(tokens)
+    #[must_use]
+    pub fn tokens(&self) -> f64 {
+        self.inner.tokens()
     }
 
     /// Acquire a single token.
@@ -171,10 +152,10 @@ impl LeakyBucket {
     ///
     /// ```rust
     /// use leaky_bucket_lite::LeakyBucket;
-    /// use std::{error::Error, time::Duration};
+    /// use std::time::Duration;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn Error>> {
+    /// async fn main() {
     ///     let rate_limiter = LeakyBucket::builder()
     ///         .max(5.0)
     ///         .tokens(0.0)
@@ -184,19 +165,13 @@ impl LeakyBucket {
     ///
     ///     println!("Waiting for permit...");
     ///     // should take about 5 seconds to acquire.
-    ///     rate_limiter.acquire_one().await?;
+    ///     rate_limiter.acquire_one().await;
     ///     println!("I made it!");
-    ///
-    ///     Ok(())
     /// }
     /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns an `Error` when communicating with the actor fails.
     #[inline]
-    pub async fn acquire_one(&self) -> Result<(), Error> {
-        self.acquire(1.0).await
+    pub async fn acquire_one(&self) {
+        self.acquire(1.0).await;
     }
 
     /// Acquire the given `amount` of tokens.
@@ -205,10 +180,10 @@ impl LeakyBucket {
     ///
     /// ```rust
     /// use leaky_bucket_lite::LeakyBucket;
-    /// use std::{error::Error, time::Duration};
+    /// use std::time::Duration;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn Error>> {
+    /// async fn main() {
     ///     let rate_limiter = LeakyBucket::builder()
     ///         .max(5.0)
     ///         .tokens(0.0)
@@ -218,27 +193,12 @@ impl LeakyBucket {
     ///
     ///     println!("Waiting for permit...");
     ///     // should take about 25 seconds to acquire.
-    ///     rate_limiter.acquire(5.0).await?;
+    ///     rate_limiter.acquire(5.0).await;
     ///     println!("I made it!");
-    ///
-    ///     Ok(())
     /// }
     /// ```
-    ///
-    /// # Errors
-    ///
-    /// Returns an `Error` when communicating with the actor fails.
-    pub async fn acquire(&self, amount: f64) -> Result<(), Error> {
-        let (send, recv) = oneshot::channel();
-        let msg = ActorMessage::Acquire {
-            amount,
-            respond_to: send,
-        };
-
-        self.sender.send(msg)?;
-        recv.await?;
-
-        Ok(())
+    pub async fn acquire(&self, amount: f64) {
+        self.inner.acquire(amount).await;
     }
 }
 

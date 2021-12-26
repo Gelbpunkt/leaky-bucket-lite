@@ -14,7 +14,7 @@ async fn test_overflow() {
     let begin = Instant::now();
 
     for _ in 0..10 {
-        rate_limiter.acquire_one().await.expect("No reason to fail");
+        rate_limiter.acquire_one().await;
     }
 
     let elapsed = Instant::now().duration_since(begin);
@@ -33,7 +33,7 @@ async fn test_overflow_2() {
 
     let begin = Instant::now();
 
-    rate_limiter.acquire(10.0).await.expect("No reason to fail");
+    rate_limiter.acquire(10.0).await;
 
     let elapsed = Instant::now().duration_since(begin);
     println!("Elapsed: {:?}", elapsed);

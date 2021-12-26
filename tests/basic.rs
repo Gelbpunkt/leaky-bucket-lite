@@ -18,11 +18,11 @@ async fn test_leaky_bucket() {
 
     let test = async {
         let start = Instant::now();
-        leaky.acquire(10.0).await.unwrap();
+        leaky.acquire(10.0).await;
         wakeups += 1;
-        leaky.acquire(10.0).await.unwrap();
+        leaky.acquire(10.0).await;
         wakeups += 1;
-        leaky.acquire(10.0).await.unwrap();
+        leaky.acquire(10.0).await;
         wakeups += 1;
         duration = Some(Instant::now().duration_since(start));
     };

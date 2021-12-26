@@ -12,7 +12,7 @@ async fn test_issue5_a() {
     let begin = Instant::now();
 
     for _ in 0..10 {
-        rate_limiter.acquire_one().await.expect("No reason to fail");
+        rate_limiter.acquire_one().await;
     }
 
     let elapsed = Instant::now().duration_since(begin);
@@ -30,7 +30,7 @@ async fn test_issue5_b() {
     let begin = Instant::now();
 
     for _ in 0..2 {
-        rate_limiter.acquire_one().await.expect("No reason to fail");
+        rate_limiter.acquire_one().await;
     }
 
     let elapsed = Instant::now().duration_since(begin);
@@ -49,7 +49,7 @@ async fn test_issue5_c() {
         .build();
 
     tokio::time::sleep(Duration::from_secs(3)).await;
-    rate_limiter.acquire(7.0).await.expect("No reason to fail");
+    rate_limiter.acquire(7.0).await;
 
     let elapsed = Instant::now().duration_since(start);
     println!("Elapsed in c: {:?}", elapsed);

@@ -1,4 +1,5 @@
 use leaky_bucket_lite::{sync_threadsafe::LeakyBucket as SyncLeakyBucket, LeakyBucket};
+use tokio::time::sleep;
 
 use std::time::Duration;
 
@@ -11,37 +12,16 @@ async fn test_tokens() {
         .refill_interval(Duration::from_millis(100))
         .build();
 
-    assert_eq!(rate_limiter.tokens().await.expect("No reason to fail"), 5.0);
+    assert_eq!(rate_limiter.tokens(), 5.0);
 
     for i in 0..5 {
-        assert_eq!(
-            rate_limiter
-                .tokens()
-                .await
-                .expect("No reason to fail")
-                .round(),
-            5.0 - i as f64
-        );
-        rate_limiter.acquire_one().await.expect("No reason to fail");
+        assert_eq!(rate_limiter.tokens().round(), 5.0 - i as f64);
+        rate_limiter.acquire_one().await;
     }
 
-    assert_eq!(
-        rate_limiter
-            .tokens()
-            .await
-            .expect("No reason to fail")
-            .round(),
-        0.0
-    );
-    rate_limiter.acquire_one().await.expect("No reason to fail");
-    assert_eq!(
-        rate_limiter
-            .tokens()
-            .await
-            .expect("No reason to fail")
-            .round(),
-        0.0
-    );
+    assert_eq!(rate_limiter.tokens().round(), 0.0);
+    rate_limiter.acquire_one().await;
+    assert_eq!(rate_limiter.tokens().round(), 0.0);
 }
 
 #[test]
@@ -62,5 +42,27 @@ fn test_tokens_sync_threadsafe() {
 
     assert_eq!(rate_limiter.tokens().round(), 0.0);
     rate_limiter.acquire_one();
+    assert_eq!(rate_limiter.tokens().round(), 0.0);
+}
+
+#[tokio::test]
+async fn test_concurrent_tokens() {
+    let rate_limiter = LeakyBucket::builder()
+        .max(5.0)
+        .tokens(0.0)
+        .refill_amount(1.0)
+        .refill_interval(Duration::from_millis(100))
+        .build();
+
+    let rl = rate_limiter.clone();
+    tokio::spawn(async move {
+        rl.acquire(5.0).await;
+    });
+
+    for i in 0..5 {
+        assert_eq!(rate_limiter.tokens().round(), i as f64);
+        sleep(Duration::from_millis(100)).await;
+    }
+
     assert_eq!(rate_limiter.tokens().round(), 0.0);
 }

@@ -17,7 +17,7 @@ async fn test_concurrent_rate_limited() {
 
     let one = async {
         loop {
-            leaky.acquire(1.0).await.unwrap();
+            leaky.acquire(1.0).await;
             one_wakeups += 1;
         }
     };
@@ -26,7 +26,7 @@ async fn test_concurrent_rate_limited() {
 
     let two = async {
         loop {
-            leaky.acquire(1.0).await.unwrap();
+            leaky.acquire(1.0).await;
             two_wakeups += 1;
         }
     };

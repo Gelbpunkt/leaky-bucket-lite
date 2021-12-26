@@ -16,7 +16,7 @@ async fn test_ao_issue() {
     tokio::time::sleep(Duration::from_secs(10)).await;
 
     for _ in 0..10 {
-        rate_limiter.acquire_one().await.expect("No reason to fail");
+        rate_limiter.acquire_one().await;
     }
 
     let elapsed = Instant::now().duration_since(begin);
@@ -35,13 +35,13 @@ async fn test_ao_issue_2() {
 
     tokio::time::sleep(Duration::from_secs(11)).await;
 
-    rate_limiter.acquire_one().await.expect("No reason to fail");
+    rate_limiter.acquire_one().await;
     let first_acquire = Instant::now();
 
     for _ in 0..4 {
-        rate_limiter.acquire_one().await.expect("No reason to fail");
+        rate_limiter.acquire_one().await;
     }
-    rate_limiter.acquire_one().await.expect("No reason to fail");
+    rate_limiter.acquire_one().await;
     let elapsed = Instant::now().duration_since(first_acquire);
     println!("Elapsed: {:?}", elapsed);
     assert!((elapsed.as_secs_f64() - 1.0).abs() < 0.1);
