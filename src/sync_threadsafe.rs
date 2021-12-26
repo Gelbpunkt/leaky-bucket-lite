@@ -23,9 +23,9 @@
 //!     Ok(())
 //! }
 //! ```
-#[cfg(feature = "parking-lot")]
+#[cfg(feature = "parking_lot")]
 use parking_lot::{Mutex, MutexGuard};
-#[cfg(not(feature = "parking-lot"))]
+#[cfg(not(feature = "parking_lot"))]
 use std::sync::{Mutex, MutexGuard};
 use std::{
     sync::Arc,
@@ -55,14 +55,14 @@ impl LeakyBucket {
             refill_interval,
             refill_amount,
             inner: Arc::new(Mutex::new(LeakyBucketInner {
-                tokens: tokens,
+                tokens,
                 last_refill: Instant::now(),
             })),
         }
     }
 
     #[inline]
-    fn update_tokens(&self, inner: &mut MutexGuard<LeakyBucketInner>) {
+    fn update_tokens(&self, inner: &mut MutexGuard<'_, LeakyBucketInner>) {
         let time_passed = Instant::now() - inner.last_refill;
         let refills_since =
             (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor();
@@ -89,9 +89,9 @@ impl LeakyBucket {
     /// Get the current number of tokens available.
     #[must_use]
     pub fn tokens(&self) -> f64 {
-        #[cfg(not(feature = "parking-lot"))]
+        #[cfg(not(feature = "parking_lot"))]
         let mut inner = self.inner.lock().expect("Mutex poisoned");
-        #[cfg(feature = "parking-lot")]
+        #[cfg(feature = "parking_lot")]
         let mut inner = self.inner.lock();
         self.update_tokens(&mut inner);
         inner.tokens
@@ -163,9 +163,9 @@ impl LeakyBucket {
     ///
     /// Returns an `Error` when communicating with the actor fails.
     pub fn acquire(&self, amount: f64) {
-        #[cfg(not(feature = "parking-lot"))]
+        #[cfg(not(feature = "parking_lot"))]
         let mut inner = self.inner.lock().expect("Mutex poisoned");
-        #[cfg(feature = "parking-lot")]
+        #[cfg(feature = "parking_lot")]
         let mut inner = self.inner.lock();
 
         self.update_tokens(&mut inner);

@@ -1,4 +1,5 @@
-#![deny(missing_docs, clippy::pedantic)]
+//! # leaky-bucket-lite
+//!
 //! [![Documentation](https://docs.rs/leaky-bucket-lite/badge.svg)](https://docs.rs/leaky-bucket-lite)
 //! [![Crates](https://img.shields.io/crates/v/leaky-bucket-lite.svg)](https://crates.io/crates/leaky-bucket-lite)
 //! [![Actions Status](https://github.com/Gelbpunkt/leaky-bucket-lite/workflows/Rust/badge.svg)](https://github.com/Gelbpunkt/leaky-bucket-lite/actions)
@@ -26,7 +27,7 @@
 //!   * [`sync_threadsafe::LeakyBucket`] (thread-safe, available via the `sync-threadsafe` feature)
 //!   * [`sync::LeakyBucket`] (not thread-safe, available via the `sync` feature).
 //!
-//! For potential performance increase with `sync-threadsafe` using [`parking_lot`]'s locking objects, enable the `parking-lot` feature.
+//! For potential performance increase with `sync-threadsafe` or `tokio` using [`parking_lot`]'s locking objects, enable the `parking_lot` feature.
 //!
 //! ## Example
 //!
@@ -52,6 +53,20 @@
 //!
 //! [leaky bucket]: https://en.wikipedia.org/wiki/Leaky_bucket
 //! [udoprog's leaky-bucket]: https://github.com/udoprog/leaky-bucket
+
+#![deny(
+    clippy::all,
+    clippy::missing_const_for_fn,
+    clippy::pedantic,
+    future_incompatible,
+    missing_docs,
+    nonstandard_style,
+    rust_2018_idioms,
+    rustdoc::broken_intra_doc_links,
+    unsafe_code,
+    unused,
+    warnings
+)]
 
 #[cfg(feature = "tokio")]
 mod tokio;

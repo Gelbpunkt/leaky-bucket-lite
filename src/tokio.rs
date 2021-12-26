@@ -1,7 +1,7 @@
-#[cfg(feature = "parking-lot")]
+#[cfg(feature = "parking_lot")]
 use parking_lot::RwLock;
 use std::sync::Arc;
-#[cfg(not(feature = "parking-lot"))]
+#[cfg(not(feature = "parking_lot"))]
 use std::sync::RwLock;
 use tokio::{
     sync::Semaphore,
@@ -43,13 +43,13 @@ impl LeakyBucketInner {
     /// of tokens in the bucket.
     #[inline]
     fn update_tokens(&self) -> f64 {
-        #[cfg(feature = "parking-lot")]
+        #[cfg(feature = "parking_lot")]
         let mut last_refill = self.last_refill.write();
-        #[cfg(not(feature = "parking-lot"))]
+        #[cfg(not(feature = "parking_lot"))]
         let mut last_refill = self.last_refill.write().expect("RwLock poisoned");
-        #[cfg(feature = "parking-lot")]
+        #[cfg(feature = "parking_lot")]
         let mut tokens = self.tokens.write();
-        #[cfg(not(feature = "parking-lot"))]
+        #[cfg(not(feature = "parking_lot"))]
         let mut tokens = self.tokens.write().expect("RwLock poisoned");
 
         let time_passed = Instant::now() - *last_refill;
@@ -82,9 +82,9 @@ impl LeakyBucketInner {
             let refills_needed = (tokens_needed / self.refill_amount).ceil();
 
             let target_time = {
-                #[cfg(feature = "parking-lot")]
+                #[cfg(feature = "parking_lot")]
                 let last_refill = self.last_refill.read();
-                #[cfg(not(feature = "parking-lot"))]
+                #[cfg(not(feature = "parking_lot"))]
                 let last_refill = self.last_refill.read().expect("RwLock poisoned");
 
                 *last_refill + self.refill_interval.mul_f64(refills_needed)
@@ -95,11 +95,11 @@ impl LeakyBucketInner {
             self.update_tokens();
         }
 
-        #[cfg(feature = "parking-lot")]
+        #[cfg(feature = "parking_lot")]
         {
             *self.tokens.write() -= amount;
         }
-        #[cfg(not(feature = "parking-lot"))]
+        #[cfg(not(feature = "parking_lot"))]
         {
             *self.tokens.write().expect("RwLock poisoned") -= amount;
         }
@@ -126,7 +126,7 @@ impl LeakyBucket {
 
     /// Construct a new leaky bucket through a builder.
     #[must_use]
-    pub fn builder() -> Builder {
+    pub const fn builder() -> Builder {
         Builder::new()
     }
 
@@ -214,7 +214,7 @@ pub struct Builder {
 impl Builder {
     /// Create a new builder with all defaults.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             max: None,
             tokens: None,
@@ -225,7 +225,7 @@ impl Builder {
 
     /// Set the max value for the builder.
     #[must_use]
-    pub fn max(mut self, max: f64) -> Self {
+    pub const fn max(mut self, max: f64) -> Self {
         self.max = Some(max);
         self
     }
@@ -234,21 +234,21 @@ impl Builder {
     ///
     /// If set to larger than `max` at build time, will only saturate to max.
     #[must_use]
-    pub fn tokens(mut self, tokens: f64) -> Self {
+    pub const fn tokens(mut self, tokens: f64) -> Self {
         self.tokens = Some(tokens);
         self
     }
 
     /// Set the max value for the builder.
     #[must_use]
-    pub fn refill_interval(mut self, refill_interval: Duration) -> Self {
+    pub const fn refill_interval(mut self, refill_interval: Duration) -> Self {
         self.refill_interval = Some(refill_interval);
         self
     }
 
     /// Set the refill amount to use.
     #[must_use]
-    pub fn refill_amount(mut self, refill_amount: f64) -> Self {
+    pub const fn refill_amount(mut self, refill_amount: f64) -> Self {
         self.refill_amount = Some(refill_amount);
         self
     }
