@@ -11,14 +11,14 @@ use tokio::{
 #[derive(Debug)]
 struct LeakyBucketInner {
     /// How many tokens this bucket can hold.
-    max: f64,
+    max: u32,
     /// Interval at which the bucket gains tokens.
     refill_interval: Duration,
     /// Amount of tokens gained per interval.
-    refill_amount: f64,
+    refill_amount: u32,
 
     /// Current tokens in the bucket.
-    tokens: RwLock<f64>,
+    tokens: RwLock<u32>,
     /// Last refill of the tokens.
     last_refill: RwLock<Instant>,
 
@@ -28,7 +28,7 @@ struct LeakyBucketInner {
 }
 
 impl LeakyBucketInner {
-    fn new(max: f64, tokens: f64, refill_interval: Duration, refill_amount: f64) -> Self {
+    fn new(max: u32, tokens: u32, refill_interval: Duration, refill_amount: u32) -> Self {
         Self {
             tokens: RwLock::new(tokens),
             max,
@@ -42,7 +42,7 @@ impl LeakyBucketInner {
     /// Updates the tokens in the leaky bucket and returns the current amount
     /// of tokens in the bucket.
     #[inline]
-    fn update_tokens(&self) -> f64 {
+    fn update_tokens(&self) -> u32 {
         #[cfg(feature = "parking_lot")]
         let mut last_refill = self.last_refill.write();
         #[cfg(not(feature = "parking_lot"))]
@@ -53,24 +53,25 @@ impl LeakyBucketInner {
         let mut tokens = self.tokens.write().expect("RwLock poisoned");
 
         let time_passed = Instant::now() - *last_refill;
-        let refills_since =
-            (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor();
-        *tokens += self.refill_amount * refills_since;
-        *last_refill += self.refill_interval.mul_f64(refills_since);
 
-        if *tokens > self.max {
-            *tokens = self.max;
-        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let refills_since =
+            (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor() as u32;
+
+        *tokens += self.refill_amount * refills_since;
+        *last_refill += self.refill_interval * refills_since;
+
+        *tokens = tokens.min(self.max);
 
         *tokens
     }
 
     #[inline]
-    fn tokens(&self) -> f64 {
+    fn tokens(&self) -> u32 {
         self.update_tokens()
     }
 
-    async fn acquire(&self, amount: f64) {
+    async fn acquire(&self, amount: u32) {
         // Make sure this is the only task accessing the tokens in a real
         // "write" rather than "update" way.
         let _permit = self.semaphore.acquire().await;
@@ -79,7 +80,12 @@ impl LeakyBucketInner {
 
         if current_tokens < amount {
             let tokens_needed = amount - current_tokens;
-            let refills_needed = (tokens_needed / self.refill_amount).ceil();
+            let mut refills_needed = tokens_needed / self.refill_amount;
+            let refills_needed_remainder = tokens_needed % self.refill_amount;
+
+            if refills_needed_remainder > 0 {
+                refills_needed += 1;
+            }
 
             let target_time = {
                 #[cfg(feature = "parking_lot")]
@@ -87,7 +93,7 @@ impl LeakyBucketInner {
                 #[cfg(not(feature = "parking_lot"))]
                 let last_refill = self.last_refill.read().expect("RwLock poisoned");
 
-                *last_refill + self.refill_interval.mul_f64(refills_needed)
+                *last_refill + self.refill_interval * refills_needed
             };
 
             sleep_until(target_time).await;
@@ -113,7 +119,7 @@ pub struct LeakyBucket {
 }
 
 impl LeakyBucket {
-    fn new(max: f64, tokens: f64, refill_interval: Duration, refill_amount: f64) -> Self {
+    fn new(max: u32, tokens: u32, refill_interval: Duration, refill_amount: u32) -> Self {
         let inner = Arc::new(LeakyBucketInner::new(
             max,
             tokens,
@@ -132,13 +138,13 @@ impl LeakyBucket {
 
     /// Get the max number of tokens this rate limiter is configured for.
     #[must_use]
-    pub fn max(&self) -> f64 {
+    pub fn max(&self) -> u32 {
         self.inner.max
     }
 
     /// Get the current number of tokens available.
     #[must_use]
-    pub fn tokens(&self) -> f64 {
+    pub fn tokens(&self) -> u32 {
         self.inner.tokens()
     }
 
@@ -157,10 +163,10 @@ impl LeakyBucket {
     /// #[tokio::main]
     /// async fn main() {
     ///     let rate_limiter = LeakyBucket::builder()
-    ///         .max(5.0)
-    ///         .tokens(0.0)
+    ///         .max(5)
+    ///         .tokens(0)
     ///         .refill_interval(Duration::from_secs(5))
-    ///         .refill_amount(1.0)
+    ///         .refill_amount(1)
     ///         .build();
     ///
     ///     println!("Waiting for permit...");
@@ -171,7 +177,7 @@ impl LeakyBucket {
     /// ```
     #[inline]
     pub async fn acquire_one(&self) {
-        self.acquire(1.0).await;
+        self.acquire(1).await;
     }
 
     /// Acquire the given `amount` of tokens.
@@ -185,19 +191,28 @@ impl LeakyBucket {
     /// #[tokio::main]
     /// async fn main() {
     ///     let rate_limiter = LeakyBucket::builder()
-    ///         .max(5.0)
-    ///         .tokens(0.0)
+    ///         .max(5)
+    ///         .tokens(0)
     ///         .refill_interval(Duration::from_secs(5))
-    ///         .refill_amount(1.0)
+    ///         .refill_amount(1)
     ///         .build();
     ///
     ///     println!("Waiting for permit...");
     ///     // should take about 25 seconds to acquire.
-    ///     rate_limiter.acquire(5.0).await;
+    ///     rate_limiter.acquire(5).await;
     ///     println!("I made it!");
     /// }
     /// ```
-    pub async fn acquire(&self, amount: f64) {
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    pub async fn acquire(&self, amount: u32) {
+        assert!(
+            amount <= self.max(),
+            "Acquiring more tokens than the configured maximum is not possible"
+        );
+
         self.inner.acquire(amount).await;
     }
 }
@@ -205,10 +220,10 @@ impl LeakyBucket {
 /// Builder for a leaky bucket.
 #[derive(Debug)]
 pub struct Builder {
-    max: Option<f64>,
-    tokens: Option<f64>,
+    max: Option<u32>,
+    tokens: Option<u32>,
     refill_interval: Option<Duration>,
-    refill_amount: Option<f64>,
+    refill_amount: Option<u32>,
 }
 
 impl Builder {
@@ -225,7 +240,7 @@ impl Builder {
 
     /// Set the max value for the builder.
     #[must_use]
-    pub const fn max(mut self, max: f64) -> Self {
+    pub const fn max(mut self, max: u32) -> Self {
         self.max = Some(max);
         self
     }
@@ -234,7 +249,7 @@ impl Builder {
     ///
     /// If set to larger than `max` at build time, will only saturate to max.
     #[must_use]
-    pub const fn tokens(mut self, tokens: f64) -> Self {
+    pub const fn tokens(mut self, tokens: u32) -> Self {
         self.tokens = Some(tokens);
         self
     }
@@ -248,7 +263,7 @@ impl Builder {
 
     /// Set the refill amount to use.
     #[must_use]
-    pub const fn refill_amount(mut self, refill_amount: f64) -> Self {
+    pub const fn refill_amount(mut self, refill_amount: u32) -> Self {
         self.refill_amount = Some(refill_amount);
         self
     }
@@ -256,10 +271,10 @@ impl Builder {
     /// Construct a new leaky bucket.
     #[must_use]
     pub fn build(self) -> LeakyBucket {
-        const DEFAULT_MAX: f64 = 120.0;
-        const DEFAULT_TOKENS: f64 = 0.0;
+        const DEFAULT_MAX: u32 = 120;
+        const DEFAULT_TOKENS: u32 = 0;
         const DEFAULT_REFILL_INTERVAL: Duration = Duration::from_secs(1);
-        const DEFAULT_REFILL_AMOUNT: f64 = 1.0;
+        const DEFAULT_REFILL_AMOUNT: u32 = 1;
 
         let max = self.max.unwrap_or(DEFAULT_MAX);
         let tokens = self.tokens.unwrap_or(DEFAULT_TOKENS);

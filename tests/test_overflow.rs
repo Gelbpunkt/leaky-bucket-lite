@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 async fn test_overflow() {
     let rate_limiter = LeakyBucket::builder()
-        .max(5.0)
-        .tokens(5.0)
-        .refill_amount(1.0)
+        .max(5)
+        .tokens(5)
+        .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
         .build();
 
@@ -23,17 +23,18 @@ async fn test_overflow() {
 }
 
 #[tokio::test]
+#[should_panic]
 async fn test_overflow_2() {
     let rate_limiter = LeakyBucket::builder()
-        .max(5.0)
-        .tokens(5.0)
-        .refill_amount(1.0)
+        .max(5)
+        .tokens(5)
+        .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
         .build();
 
     let begin = Instant::now();
 
-    rate_limiter.acquire(10.0).await;
+    rate_limiter.acquire(10).await;
 
     let elapsed = Instant::now().duration_since(begin);
     println!("Elapsed: {:?}", elapsed);
@@ -43,9 +44,9 @@ async fn test_overflow_2() {
 #[test]
 fn test_overflow_sync_threadsafe() {
     let rate_limiter = SyncLeakyBucket::builder()
-        .max(5.0)
-        .tokens(5.0)
-        .refill_amount(1.0)
+        .max(5)
+        .tokens(5)
+        .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
         .build();
 
@@ -61,17 +62,18 @@ fn test_overflow_sync_threadsafe() {
 }
 
 #[test]
+#[should_panic]
 fn test_overflow_2_sync_threadsafe() {
     let rate_limiter = SyncLeakyBucket::builder()
-        .max(5.0)
-        .tokens(5.0)
-        .refill_amount(1.0)
+        .max(5)
+        .tokens(5)
+        .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
         .build();
 
     let begin = Instant::now();
 
-    rate_limiter.acquire(10.0);
+    rate_limiter.acquire(10);
 
     let elapsed = Instant::now().duration_since(begin);
     println!("Elapsed: {:?}", elapsed);

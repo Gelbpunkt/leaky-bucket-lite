@@ -14,7 +14,7 @@ use std::{
 #[tokio::test]
 async fn test_rate_limit_target() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(50.0)
+        .refill_amount(50)
         .refill_interval(Duration::from_millis(200))
         .build();
 
@@ -67,7 +67,7 @@ fn test_rate_limit_target_sync_threadsafe() {
     }
 
     let rate_limiter = SyncLeakyBucket::builder()
-        .refill_amount(50.0)
+        .refill_amount(50)
         .refill_interval(Duration::from_millis(200))
         .build();
 

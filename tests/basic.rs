@@ -7,9 +7,9 @@ async fn test_leaky_bucket() {
     let interval = Duration::from_millis(20);
 
     let leaky = Builder::new()
-        .tokens(0.0)
-        .max(10.0)
-        .refill_amount(10.0)
+        .tokens(0)
+        .max(10)
+        .refill_amount(10)
         .refill_interval(interval)
         .build();
 
@@ -18,11 +18,11 @@ async fn test_leaky_bucket() {
 
     let test = async {
         let start = Instant::now();
-        leaky.acquire(10.0).await;
+        leaky.acquire(10).await;
         wakeups += 1;
-        leaky.acquire(10.0).await;
+        leaky.acquire(10).await;
         wakeups += 1;
-        leaky.acquire(10.0).await;
+        leaky.acquire(10).await;
         wakeups += 1;
         duration = Some(Instant::now().duration_since(start));
     };

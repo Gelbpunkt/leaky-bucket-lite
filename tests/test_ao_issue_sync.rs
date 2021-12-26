@@ -5,10 +5,10 @@ fn test_ao_issue() {
     use std::time::{Duration, Instant};
 
     let mut rate_limiter = LeakyBucket::builder()
-        .refill_amount(1.0)
+        .refill_amount(1)
         .refill_interval(Duration::from_secs(2))
-        .max(5.0)
-        .tokens(5.0)
+        .max(5)
+        .tokens(5)
         .build();
 
     let begin = Instant::now();
@@ -31,10 +31,10 @@ fn test_ao_issue_2() {
     use std::time::{Duration, Instant};
 
     let mut rate_limiter = LeakyBucket::builder()
-        .refill_amount(1.0)
+        .refill_amount(1)
         .refill_interval(Duration::from_secs(2))
-        .max(5.0)
-        .tokens(5.0)
+        .max(5)
+        .tokens(5)
         .build();
 
     std::thread::sleep(Duration::from_secs(11));

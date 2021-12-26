@@ -7,9 +7,9 @@ async fn test_concurrent_rate_limited() {
     let interval = Duration::from_millis(20);
 
     let leaky = Builder::new()
-        .tokens(0.0)
-        .max(10.0)
-        .refill_amount(1.0)
+        .tokens(0)
+        .max(10)
+        .refill_amount(1)
         .refill_interval(interval)
         .build();
 
@@ -17,7 +17,7 @@ async fn test_concurrent_rate_limited() {
 
     let one = async {
         loop {
-            leaky.acquire(1.0).await;
+            leaky.acquire(1).await;
             one_wakeups += 1;
         }
     };
@@ -26,7 +26,7 @@ async fn test_concurrent_rate_limited() {
 
     let two = async {
         loop {
-            leaky.acquire(1.0).await;
+            leaky.acquire(1).await;
             two_wakeups += 1;
         }
     };

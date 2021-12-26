@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 #[tokio::test]
 async fn test_issue5_a() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(1.0)
+        .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
         .build();
 
@@ -23,7 +23,7 @@ async fn test_issue5_a() {
 #[tokio::test]
 async fn test_issue5_b() {
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(1.0)
+        .refill_amount(1)
         .refill_interval(Duration::from_secs(2))
         .build();
 
@@ -43,13 +43,13 @@ async fn test_issue5_b() {
 async fn test_issue5_c() {
     let start = Instant::now();
     let rate_limiter = LeakyBucket::builder()
-        .refill_amount(5.0)
-        .tokens(0.0)
+        .refill_amount(5)
+        .tokens(0)
         .refill_interval(Duration::from_secs(2))
         .build();
 
     tokio::time::sleep(Duration::from_secs(3)).await;
-    rate_limiter.acquire(7.0).await;
+    rate_limiter.acquire(7).await;
 
     let elapsed = Instant::now().duration_since(start);
     println!("Elapsed in c: {:?}", elapsed);
@@ -59,7 +59,7 @@ async fn test_issue5_c() {
 #[test]
 fn test_issue5_a_sync_threadsafe() {
     let rate_limiter = SyncLeakyBucket::builder()
-        .refill_amount(1.0)
+        .refill_amount(1)
         .refill_interval(Duration::from_millis(100))
         .build();
 
@@ -77,7 +77,7 @@ fn test_issue5_a_sync_threadsafe() {
 #[test]
 fn test_issue5_b_sync_threadsafe() {
     let rate_limiter = SyncLeakyBucket::builder()
-        .refill_amount(1.0)
+        .refill_amount(1)
         .refill_interval(Duration::from_secs(2))
         .build();
 
@@ -97,13 +97,13 @@ fn test_issue5_b_sync_threadsafe() {
 async fn test_issue5_c_sync_threadsafe() {
     let start = Instant::now();
     let rate_limiter = SyncLeakyBucket::builder()
-        .refill_amount(5.0)
-        .tokens(0.0)
+        .refill_amount(5)
+        .tokens(0)
         .refill_interval(Duration::from_secs(2))
         .build();
 
     std::thread::sleep(Duration::from_secs(3));
-    rate_limiter.acquire(7.0);
+    rate_limiter.acquire(7);
 
     let elapsed = Instant::now().duration_since(start);
     println!("Elapsed in c: {:?}", elapsed);
