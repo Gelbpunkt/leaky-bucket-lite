@@ -77,6 +77,14 @@ impl LeakyBucket {
         self.tokens
     }
 
+    /// Get the next time at which the tokens will be refilled.
+    #[must_use]
+    pub fn next_refill(&mut self) -> Instant {
+        self.update_tokens();
+
+        self.last_refill + self.refill_interval
+    }
+
     /// Acquire a single token.
     ///
     /// This is identical to [`acquire`] with an argument of `1.0`.

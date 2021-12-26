@@ -93,8 +93,8 @@ fn test_issue5_b_sync_threadsafe() {
     assert!((elapsed.as_secs_f64() - 4.).abs() < 0.1);
 }
 
-#[tokio::test]
-async fn test_issue5_c_sync_threadsafe() {
+#[test]
+fn test_issue5_c_sync_threadsafe() {
     let start = Instant::now();
     let rate_limiter = SyncLeakyBucket::builder()
         .refill_amount(5)

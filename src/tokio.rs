@@ -71,6 +71,17 @@ impl LeakyBucketInner {
         self.update_tokens()
     }
 
+    fn next_refill(&self) -> Instant {
+        self.update_tokens();
+
+        #[cfg(feature = "parking_lot")]
+        let last_refill = self.last_refill.read();
+        #[cfg(not(feature = "parking_lot"))]
+        let last_refill = self.last_refill.read().expect("RwLock poisoned");
+
+        *last_refill + self.refill_interval
+    }
+
     async fn acquire(&self, amount: u32) {
         // Make sure this is the only task accessing the tokens in a real
         // "write" rather than "update" way.
@@ -146,6 +157,12 @@ impl LeakyBucket {
     #[must_use]
     pub fn tokens(&self) -> u32 {
         self.inner.tokens()
+    }
+
+    /// Get the next time at which the tokens will be refilled.
+    #[must_use]
+    pub fn next_refill(&self) -> Instant {
+        self.inner.next_refill()
     }
 
     /// Acquire a single token.
