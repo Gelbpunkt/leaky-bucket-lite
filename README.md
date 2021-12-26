@@ -2,9 +2,9 @@
 
 # leaky-bucket-lite
 
-[Documentation](https://docs.rs/leaky-bucket-lite)
-[Crates](https://crates.io/crates/leaky-bucket-lite)
-[Actions Status](https://github.com/Gelbpunkt/leaky-bucket-lite/actions)
+[![docs badge][]][docs link]
+[![crates badge][]][crates link]
+[![actions badge][]][actions link]
 
 A token-based rate limiter based on the [leaky bucket] algorithm, mainly a lazy reimplementation of [udoprog's leaky-bucket] with less dependencies and overhead.
 
@@ -53,6 +53,12 @@ async fn main() {
 }
 ```
 
+[actions badge]: https://github.com/Gelbpunkt/leaky-bucket-lite/workflows/Rust/badge.svg
+[actions link]: https://github.com/Gelbpunkt/leaky-bucket-lite/actions
+[crates badge]: https://img.shields.io/crates/v/leaky-bucket-lite.svg
+[crates link]: https://crates.io/crates/leaky-bucket-lite
+[docs badge]: https://docs.rs/leaky-bucket-lite/badge.svg
+[docs link]: https://docs.rs/leaky-bucket-lite
 [leaky bucket]: https://en.wikipedia.org/wiki/Leaky_bucket
 [udoprog's leaky-bucket]: https://github.com/udoprog/leaky-bucket
 
