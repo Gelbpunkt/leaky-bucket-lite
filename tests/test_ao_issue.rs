@@ -1,5 +1,4 @@
-use leaky_bucket_lite::LeakyBucket;
-use leaky_bucket_lite::sync_threadsafe::LeakyBucket as SyncLeakyBucket;
+use leaky_bucket_lite::{sync_threadsafe::LeakyBucket as SyncLeakyBucket, LeakyBucket};
 
 use std::time::{Duration, Instant};
 
