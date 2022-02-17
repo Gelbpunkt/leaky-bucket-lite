@@ -40,15 +40,15 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() {
     let rate_limiter = LeakyBucket::builder()
-        .max(5.0)
-        .tokens(0.0)
+        .max(5)
+        .tokens(0)
         .refill_interval(Duration::from_secs(1))
-        .refill_amount(1.0)
+        .refill_amount(1)
         .build();
 
     println!("Waiting for permit...");
     // should take about 5 seconds to acquire.
-    rate_limiter.acquire(5.0).await;
+    rate_limiter.acquire(5).await;
     println!("I made it!");
 }
 ```

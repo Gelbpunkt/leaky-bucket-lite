@@ -1,6 +1,6 @@
 [package]
 name = "leaky-bucket-lite"
-version = "0.5.1"
+version = "0.5.2"
 authors = ["Jens Reidel <adrian@travitia.xyz>"]
 edition = "2018"
 license = "MIT/Apache-2.0"
@@ -14,7 +14,7 @@ Slimmed down, lazy futures-aware rate limiter implementation.
 categories = ["algorithms", "network-programming", "concurrency"]
 
 [dependencies]
-parking_lot = { version = "0.11", default-features = false, optional = true }
+parking_lot = { version = "0.12", default-features = false, optional = true }
 tokio = { version = "1", default-features = false, features = ["time", "sync"], optional = true }
 
 [features]
