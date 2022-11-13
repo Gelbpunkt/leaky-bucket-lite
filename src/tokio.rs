@@ -1,10 +1,6 @@
-#[cfg(feature = "parking_lot")]
-use parking_lot::RwLock;
 use std::sync::Arc;
-#[cfg(not(feature = "parking_lot"))]
-use std::sync::RwLock;
 use tokio::{
-    sync::Semaphore,
+    sync::{Mutex, MutexGuard},
     time::{sleep_until, Duration, Instant},
 };
 
@@ -17,77 +13,63 @@ struct LeakyBucketInner {
     /// Amount of tokens gained per interval.
     refill_amount: u32,
 
-    /// Current tokens in the bucket.
-    tokens: RwLock<u32>,
-    /// Last refill of the tokens.
-    last_refill: RwLock<Instant>,
+    locked: Mutex<LeakyBucketInnerLocked>,
+}
 
-    /// To prevent more than one task from acquiring at the same time,
-    /// a Semaphore is needed to guard access.
-    semaphore: Semaphore,
+#[derive(Debug)]
+struct LeakyBucketInnerLocked {
+    /// Current tokens in the bucket.
+    tokens: u32,
+    /// Last refill of the tokens.
+    last_refill: Instant,
 }
 
 impl LeakyBucketInner {
     fn new(max: u32, tokens: u32, refill_interval: Duration, refill_amount: u32) -> Self {
         Self {
-            tokens: RwLock::new(tokens),
             max,
             refill_interval,
             refill_amount,
-            last_refill: RwLock::new(Instant::now()),
-            semaphore: Semaphore::new(1),
+            locked: Mutex::new(LeakyBucketInnerLocked {
+                tokens,
+                last_refill: Instant::now(),
+            }),
         }
     }
 
     /// Updates the tokens in the leaky bucket and returns the current amount
     /// of tokens in the bucket.
     #[inline]
-    fn update_tokens(&self) -> u32 {
-        #[cfg(feature = "parking_lot")]
-        let mut last_refill = self.last_refill.write();
-        #[cfg(not(feature = "parking_lot"))]
-        let mut last_refill = self.last_refill.write().expect("RwLock poisoned");
-        #[cfg(feature = "parking_lot")]
-        let mut tokens = self.tokens.write();
-        #[cfg(not(feature = "parking_lot"))]
-        let mut tokens = self.tokens.write().expect("RwLock poisoned");
-
-        let time_passed = Instant::now() - *last_refill;
+    fn update_tokens(&self, locked: &mut MutexGuard<'_, LeakyBucketInnerLocked>) -> u32 {
+        let time_passed = Instant::now() - locked.last_refill;
 
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let refills_since =
             (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor() as u32;
 
-        *tokens += self.refill_amount * refills_since;
-        *last_refill += self.refill_interval * refills_since;
+        locked.tokens += self.refill_amount * refills_since;
+        locked.last_refill += self.refill_interval * refills_since;
 
-        *tokens = tokens.min(self.max);
+        locked.tokens = locked.tokens.min(self.max);
 
-        *tokens
+        locked.tokens
     }
 
     #[inline]
-    fn tokens(&self) -> u32 {
-        self.update_tokens()
+    async fn tokens(&self) -> u32 {
+        self.update_tokens(&mut self.locked.lock().await)
     }
 
-    fn next_refill(&self) -> Instant {
-        self.update_tokens();
+    async fn next_refill(&self) -> Instant {
+        let mut locked = self.locked.lock().await;
+        self.update_tokens(&mut locked);
 
-        #[cfg(feature = "parking_lot")]
-        let last_refill = self.last_refill.read();
-        #[cfg(not(feature = "parking_lot"))]
-        let last_refill = self.last_refill.read().expect("RwLock poisoned");
-
-        *last_refill + self.refill_interval
+        locked.last_refill + self.refill_interval
     }
 
     async fn acquire(&self, amount: u32) {
-        // Make sure this is the only task accessing the tokens in a real
-        // "write" rather than "update" way.
-        let _permit = self.semaphore.acquire().await;
-
-        let current_tokens = self.update_tokens();
+        let mut locked = self.locked.lock().await;
+        let current_tokens = self.update_tokens(&mut locked);
 
         if current_tokens < amount {
             let tokens_needed = amount - current_tokens;
@@ -98,28 +80,14 @@ impl LeakyBucketInner {
                 refills_needed += 1;
             }
 
-            let target_time = {
-                #[cfg(feature = "parking_lot")]
-                let last_refill = self.last_refill.read();
-                #[cfg(not(feature = "parking_lot"))]
-                let last_refill = self.last_refill.read().expect("RwLock poisoned");
-
-                *last_refill + self.refill_interval * refills_needed
-            };
+            let target_time = locked.last_refill + self.refill_interval * refills_needed;
 
             sleep_until(target_time).await;
 
-            self.update_tokens();
+            self.update_tokens(&mut locked);
         }
 
-        #[cfg(feature = "parking_lot")]
-        {
-            *self.tokens.write() -= amount;
-        }
-        #[cfg(not(feature = "parking_lot"))]
-        {
-            *self.tokens.write().expect("RwLock poisoned") -= amount;
-        }
+        locked.tokens -= amount;
     }
 }
 
@@ -154,15 +122,13 @@ impl LeakyBucket {
     }
 
     /// Get the current number of tokens available.
-    #[must_use]
-    pub fn tokens(&self) -> u32 {
-        self.inner.tokens()
+    pub async fn tokens(&self) -> u32 {
+        self.inner.tokens().await
     }
 
     /// Get the next time at which the tokens will be refilled.
-    #[must_use]
-    pub fn next_refill(&self) -> Instant {
-        self.inner.next_refill()
+    pub async fn next_refill(&self) -> Instant {
+        self.inner.next_refill().await
     }
 
     /// Acquire a single token.
