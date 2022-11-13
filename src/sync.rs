@@ -20,6 +20,8 @@
 //! rate_limiter.acquire(5);
 //! println!("I made it!");
 //! ```
+
+use crate::TryAcquireError;
 use std::time::{Duration, Instant};
 
 /// The leaky bucket.
@@ -139,7 +141,7 @@ impl LeakyBucket {
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
     pub fn acquire(&mut self, amount: u32) {
-        if let Err(target_time) = self.try_acquire(amount) {
+        if let Err(target_time) = self.try_acquire_inner(amount) {
             std::thread::sleep(target_time - Instant::now());
 
             self.update_tokens();
@@ -153,8 +155,7 @@ impl LeakyBucket {
     ///
     /// # Errors
     ///
-    /// If no tokens are currently available, returns the [`Instant`] at which
-    /// the next token will be ready.
+    /// If no tokens are currently available, returns a [`TryAcquireError`] error.
     ///
     /// # Example
     ///
@@ -176,7 +177,7 @@ impl LeakyBucket {
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
     #[inline]
-    pub fn try_acquire_one(&mut self) -> Result<(), Instant> {
+    pub fn try_acquire_one(&mut self) -> Result<(), TryAcquireError> {
         self.try_acquire(1)
     }
 
@@ -186,8 +187,7 @@ impl LeakyBucket {
     ///
     /// # Errors
     ///
-    /// If less tokens are currently available, returns the [`Instant`] at which
-    /// the desired amount will be ready.
+    /// If less tokens are currently available, returns a [`TryAcquireError`] error.
     ///
     /// # Example
     ///
@@ -209,7 +209,12 @@ impl LeakyBucket {
     /// # Panics
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
-    pub fn try_acquire(&mut self, amount: u32) -> Result<(), Instant> {
+    pub fn try_acquire(&mut self, amount: u32) -> Result<(), TryAcquireError> {
+        self.try_acquire_inner(amount)
+            .map_err(TryAcquireError::new_insufficient_tokens)
+    }
+
+    fn try_acquire_inner(&mut self, amount: u32) -> Result<(), Instant> {
         assert!(
             amount <= self.max(),
             "Acquiring more tokens than the configured maximum is not possible"

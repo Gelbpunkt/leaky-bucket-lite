@@ -20,6 +20,8 @@
 //! rate_limiter.acquire(5);
 //! println!("I made it!");
 //! ```
+
+use crate::TryAcquireError;
 #[cfg(feature = "parking_lot")]
 use parking_lot::{Mutex, MutexGuard};
 #[cfg(not(feature = "parking_lot"))]
@@ -161,7 +163,12 @@ impl LeakyBucket {
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
     pub fn acquire(&self, amount: u32) {
-        if let Err((mut inner, target_time)) = self.try_acquire_inner(amount) {
+        #[cfg(not(feature = "parking_lot"))]
+        let mut inner = self.inner.lock().expect("Mutex poisoned");
+        #[cfg(feature = "parking_lot")]
+        let mut inner = self.inner.lock();
+
+        if let Err(target_time) = self.try_acquire_locked(amount, &mut inner) {
             std::thread::sleep(target_time - Instant::now());
 
             self.update_tokens(&mut inner);
@@ -175,8 +182,7 @@ impl LeakyBucket {
     ///
     /// # Errors
     ///
-    /// If no tokens are currently available, returns the [`Instant`] at which
-    /// the next token will be ready.
+    /// If less tokens are currently available, returns a [`TryAcquireError`] error.
     ///
     /// # Example
     ///
@@ -198,7 +204,7 @@ impl LeakyBucket {
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
     #[inline]
-    pub fn try_acquire_one(&self) -> Result<(), Instant> {
+    pub fn try_acquire_one(&self) -> Result<(), TryAcquireError> {
         self.try_acquire(1)
     }
 
@@ -208,8 +214,7 @@ impl LeakyBucket {
     ///
     /// # Errors
     ///
-    /// If less tokens are currently available, returns the [`Instant`] at which
-    /// the desired amount will be ready.
+    /// If less tokens are currently available, returns a [`TryAcquireError`] error.
     ///
     /// # Example
     ///
@@ -231,26 +236,31 @@ impl LeakyBucket {
     /// # Panics
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
-    pub fn try_acquire(&self, amount: u32) -> Result<(), Instant> {
-        self.try_acquire_inner(amount)
-            .map_err(|(_i, target_time)| target_time)
+    pub fn try_acquire(&self, amount: u32) -> Result<(), TryAcquireError> {
+        #[cfg(not(feature = "parking_lot"))]
+        let mut inner = match self.inner.try_lock() {
+            Err(std::sync::TryLockError::WouldBlock) => return Err(TryAcquireError::new_locked(a)),
+            Err(std::sync::TryLockError::Poisoned(_)) => panic!("Mutex poisoned"),
+            Ok(inner) => inner,
+        };
+        #[cfg(feature = "parking_lot")]
+        let mut inner = self.inner.try_lock().ok_or(TryAcquireError::new_locked())?;
+
+        self.try_acquire_locked(amount, &mut inner)
+            .map_err(TryAcquireError::new_insufficient_tokens)
     }
 
-    fn try_acquire_inner(
+    fn try_acquire_locked(
         &self,
         amount: u32,
-    ) -> Result<(), (MutexGuard<'_, LeakyBucketInner>, Instant)> {
+        inner: &mut MutexGuard<'_, LeakyBucketInner>,
+    ) -> Result<(), Instant> {
         assert!(
             amount <= self.max(),
             "Acquiring more tokens than the configured maximum is not possible"
         );
 
-        #[cfg(not(feature = "parking_lot"))]
-        let mut inner = self.inner.lock().expect("Mutex poisoned");
-        #[cfg(feature = "parking_lot")]
-        let mut inner = self.inner.lock();
-
-        self.update_tokens(&mut inner);
+        self.update_tokens(inner);
 
         if inner.tokens < amount {
             let tokens_needed = amount - inner.tokens;
@@ -263,7 +273,7 @@ impl LeakyBucket {
 
             let target_time = inner.last_refill + self.refill_interval * refills_needed;
 
-            Err((inner, target_time))
+            Err(target_time)
         } else {
             inner.tokens -= amount;
             Ok(())
