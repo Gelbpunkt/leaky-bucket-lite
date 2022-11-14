@@ -45,6 +45,10 @@ required-features = ["sync-threadsafe"]
 name = "test_tokens"
 required-features = ["sync-threadsafe"]
 
+[[test]]
+name = "try_acquire"
+required-features = ["sync", "sync-threadsafe"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
