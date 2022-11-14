@@ -73,6 +73,8 @@
     unused,
     warnings
 )]
+// Document required features when the `docsrs` cfg set
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[cfg(feature = "tokio")]
 mod tokio;
