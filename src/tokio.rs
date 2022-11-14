@@ -1,3 +1,4 @@
+use crate::TryAcquireError;
 use std::sync::Arc;
 use tokio::{
     sync::{Mutex, MutexGuard},
@@ -69,7 +70,36 @@ impl LeakyBucketInner {
 
     async fn acquire(&self, amount: u32) {
         let mut locked = self.locked.lock().await;
-        let current_tokens = self.update_tokens(&mut locked);
+        if let Err(target_time) = self.try_acquire_locked(amount, &mut locked) {
+            sleep_until(target_time).await;
+
+            self.update_tokens(&mut locked);
+            locked.tokens -= amount;
+        }
+    }
+
+    fn try_acquire(&self, amount: u32) -> Result<(), TryAcquireError> {
+        self.try_acquire_locked(
+            amount,
+            &mut self
+                .locked
+                .try_lock()
+                .map_err(|_e| TryAcquireError::new_locked())?,
+        )
+        .map_err(|i| TryAcquireError::new_insufficient_tokens(i.into()))
+    }
+
+    fn try_acquire_locked(
+        &self,
+        amount: u32,
+        locked: &mut MutexGuard<'_, LeakyBucketInnerLocked>,
+    ) -> Result<(), Instant> {
+        assert!(
+            amount <= self.max,
+            "Acquiring more tokens than the configured maximum is not possible"
+        );
+
+        let current_tokens = self.update_tokens(locked);
 
         if current_tokens < amount {
             let tokens_needed = amount - current_tokens;
@@ -80,14 +110,11 @@ impl LeakyBucketInner {
                 refills_needed += 1;
             }
 
-            let target_time = locked.last_refill + self.refill_interval * refills_needed;
-
-            sleep_until(target_time).await;
-
-            self.update_tokens(&mut locked);
+            Err(locked.last_refill + self.refill_interval * refills_needed)
+        } else {
+            locked.tokens -= amount;
+            Ok(())
         }
-
-        locked.tokens -= amount;
     }
 }
 
@@ -190,13 +217,93 @@ impl LeakyBucket {
     /// # Panics
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
     pub async fn acquire(&self, amount: u32) {
-        assert!(
-            amount <= self.max(),
-            "Acquiring more tokens than the configured maximum is not possible"
-        );
-
         self.inner.acquire(amount).await;
+    }
+
+    /// Try to acquire one token, without waiting for the internal lock.
+    ///
+    /// # Errors
+    ///
+    /// A [`TryAcquireError`] is returned if the operation can't be completed immediately.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use leaky_bucket_lite::LeakyBucket;
+    /// use std::time::Duration;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let rate_limiter = LeakyBucket::builder()
+    ///         .max(5)
+    ///         .tokens(1)
+    ///         .refill_interval(Duration::from_secs(1))
+    ///         .refill_amount(1)
+    ///         .build();
+    ///
+    ///     assert!(matches!(rate_limiter.try_acquire_one(), Ok(())));
+    ///     assert!(matches!(rate_limiter.try_acquire_one(), Err(e) if e.is_insufficient_tokens()));
+    ///     tokio::spawn({
+    ///         let rate_limiter = rate_limiter.clone();
+    ///         async move {
+    ///             rate_limiter.acquire(2).await;
+    ///         }
+    ///     });
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
+    ///     assert!(matches!(rate_limiter.try_acquire_one(), Err(e) if e.is_locked()));
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
+    pub fn try_acquire_one(&self) -> Result<(), TryAcquireError> {
+        self.try_acquire(1)
+    }
+
+    /// Try to acquire the given `amount` of tokens, without waiting for the internal lock.
+    ///
+    /// # Errors
+    ///
+    /// A [`TryAcquireError`] is returned if the operation can't be completed immediately.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use leaky_bucket_lite::LeakyBucket;
+    /// use std::time::Duration;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let rate_limiter = LeakyBucket::builder()
+    ///         .max(5)
+    ///         .tokens(1)
+    ///         .refill_interval(Duration::from_secs(1))
+    ///         .refill_amount(1)
+    ///         .build();
+    ///
+    ///     assert!(matches!(rate_limiter.try_acquire(1), Ok(())));
+    ///     assert!(matches!(rate_limiter.try_acquire(1), Err(e) if e.is_insufficient_tokens()));
+    ///     tokio::spawn({
+    ///         let rate_limiter = rate_limiter.clone();
+    ///         async move {
+    ///             rate_limiter.acquire(2).await;
+    ///         }
+    ///     });
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
+    ///     assert!(matches!(rate_limiter.try_acquire(1), Err(e) if e.is_locked()));
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
+    pub fn try_acquire(&self, amount: u32) -> Result<(), TryAcquireError> {
+        self.inner.try_acquire(amount)
     }
 }
 
