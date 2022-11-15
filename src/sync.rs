@@ -20,6 +20,8 @@
 //! rate_limiter.acquire(5);
 //! println!("I made it!");
 //! ```
+
+use crate::TryAcquireError;
 use std::time::{Duration, Instant};
 
 /// The leaky bucket.
@@ -139,6 +141,80 @@ impl LeakyBucket {
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
     pub fn acquire(&mut self, amount: u32) {
+        if let Err(target_time) = self.try_acquire_inner(amount) {
+            std::thread::sleep(target_time - Instant::now());
+
+            self.update_tokens();
+            self.tokens -= amount;
+        }
+    }
+
+    /// Try to acquire one token.
+    ///
+    /// This will not wait for the token to become ready.
+    ///
+    /// # Errors
+    ///
+    /// If no tokens are currently available, returns a [`TryAcquireError`] error.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use leaky_bucket_lite::sync::LeakyBucket;
+    /// use std::time::Duration;
+    ///
+    /// let mut rate_limiter = LeakyBucket::builder()
+    ///     .max(5)
+    ///     .tokens(1)
+    ///     .refill_interval(Duration::from_secs(1))
+    ///     .build();
+    ///
+    /// assert!(matches!(rate_limiter.try_acquire_one(), Ok(())));
+    /// assert!(matches!(rate_limiter.try_acquire_one(), Err(_)));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
+    pub fn try_acquire_one(&mut self) -> Result<(), TryAcquireError> {
+        self.try_acquire(1)
+    }
+
+    /// Try to acquire the given `amount` of tokens.
+    ///
+    /// This will not wait for the tokens to become ready.
+    ///
+    /// # Errors
+    ///
+    /// If less tokens are currently available, returns a [`TryAcquireError`] error.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use leaky_bucket_lite::sync::LeakyBucket;
+    /// use std::time::Duration;
+    ///
+    /// let mut rate_limiter = LeakyBucket::builder()
+    ///     .max(5)
+    ///     .tokens(1)
+    ///     .refill_interval(Duration::from_secs(1))
+    ///     .build();
+    ///
+    /// assert!(matches!(rate_limiter.try_acquire(5), Err(_)));
+    /// assert!(matches!(rate_limiter.try_acquire(1), Ok(())));
+    /// assert!(matches!(rate_limiter.try_acquire(1), Err(_)));
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    pub fn try_acquire(&mut self, amount: u32) -> Result<(), TryAcquireError> {
+        self.try_acquire_inner(amount)
+            .map_err(TryAcquireError::new_insufficient_tokens)
+    }
+
+    fn try_acquire_inner(&mut self, amount: u32) -> Result<(), Instant> {
         assert!(
             amount <= self.max(),
             "Acquiring more tokens than the configured maximum is not possible"
@@ -157,12 +233,11 @@ impl LeakyBucket {
 
             let target_time = self.last_refill + self.refill_interval * refills_needed;
 
-            std::thread::sleep(target_time - Instant::now());
-
-            self.update_tokens();
+            Err(target_time)
+        } else {
+            self.tokens -= amount;
+            Ok(())
         }
-
-        self.tokens -= amount;
     }
 }
 

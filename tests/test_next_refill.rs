@@ -11,18 +11,18 @@ async fn test_next_refill() {
         .build();
 
     let next_refill = rate_limiter.next_refill();
-    let until = next_refill.duration_since(Instant::now());
+    let until = next_refill.await.duration_since(Instant::now());
     assert!((until.as_secs_f64() - 2.).abs() < 0.1);
 
     sleep(Duration::from_secs(3)).await;
 
     let next_refill = rate_limiter.next_refill();
-    let until = next_refill.duration_since(Instant::now());
+    let until = next_refill.await.duration_since(Instant::now());
     assert!((until.as_secs_f64() - 1.).abs() < 0.1);
 
     rate_limiter.acquire(5).await;
 
     let next_refill = rate_limiter.next_refill();
-    let until = next_refill.duration_since(Instant::now());
+    let until = next_refill.await.duration_since(Instant::now());
     assert!((until.as_secs_f64() - 1.).abs() < 0.1);
 }

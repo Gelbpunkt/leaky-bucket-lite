@@ -73,12 +73,83 @@
     unused,
     warnings
 )]
+// Document required features when the `docsrs` cfg set
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 #[cfg(feature = "tokio")]
 mod tokio;
+
 #[cfg(feature = "tokio")]
 pub use crate::tokio::*;
 #[cfg(feature = "sync")]
 pub mod sync;
 #[cfg(feature = "sync-threadsafe")]
 pub mod sync_threadsafe;
+
+use std::time::Instant;
+
+/// Error returned from the `try_acquire` functions when the operation can't be completed immediately.
+#[derive(Debug)]
+pub struct TryAcquireError {
+    kind: TryAcquireErrorKind,
+}
+
+#[derive(Debug)]
+enum TryAcquireErrorKind {
+    /// The lock can't be acquired without waiting.
+    Locked,
+    /// Not enough tokens are available.
+    InsufficientTokens(Instant),
+}
+
+impl std::error::Error for TryAcquireError {}
+
+impl std::fmt::Display for TryAcquireError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            TryAcquireErrorKind::Locked => write!(f, "operation would block"),
+            TryAcquireErrorKind::InsufficientTokens(_i) => {
+                write!(f, "insufficient tokens available to fulfill the request")
+            }
+        }
+    }
+}
+
+impl TryAcquireError {
+    const fn new_locked() -> Self {
+        Self {
+            kind: TryAcquireErrorKind::Locked,
+        }
+    }
+
+    const fn new_insufficient_tokens(target_time: Instant) -> Self {
+        Self {
+            kind: TryAcquireErrorKind::InsufficientTokens(target_time),
+        }
+    }
+
+    /// Returns `true` if the call failed because the internal lock couldn't be acquired without waiting.
+    #[must_use]
+    pub const fn is_locked(&self) -> bool {
+        matches!(self.kind, TryAcquireErrorKind::Locked)
+    }
+
+    /// Returns `true` if the call failed because there were not enough tokens available without waiting.
+    #[must_use]
+    pub const fn is_insufficient_tokens(&self) -> bool {
+        matches!(self.kind, TryAcquireErrorKind::InsufficientTokens(_))
+    }
+
+    /// Return the time at which enough tokens would be available to return without waiting.
+    ///
+    /// Depending on the cause of this error, this value might be unknown.
+    ///
+    /// This only applies, if no other token is requested in the meantime.
+    #[must_use]
+    pub const fn target_time(&self) -> Option<Instant> {
+        match self.kind {
+            TryAcquireErrorKind::Locked => None,
+            TryAcquireErrorKind::InsufficientTokens(target_time) => Some(target_time),
+        }
+    }
+}

@@ -25,6 +25,30 @@ sync-threadsafe = []
 [dev-dependencies]
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros"] }
 
+[[test]]
+name = "issue5"
+required-features = ["sync-threadsafe"]
+
+[[test]]
+name = "test_ao_issue"
+required-features = ["sync-threadsafe"]
+
+[[test]]
+name = "test_overflow"
+required-features = ["sync-threadsafe"]
+
+[[test]]
+name = "test_rate_limit_target"
+required-features = ["sync-threadsafe"]
+
+[[test]]
+name = "test_tokens"
+required-features = ["sync-threadsafe"]
+
+[[test]]
+name = "try_acquire"
+required-features = ["sync", "sync-threadsafe"]
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

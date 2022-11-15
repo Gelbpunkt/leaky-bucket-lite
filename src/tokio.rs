@@ -1,10 +1,7 @@
-#[cfg(feature = "parking_lot")]
-use parking_lot::RwLock;
+use crate::TryAcquireError;
 use std::sync::Arc;
-#[cfg(not(feature = "parking_lot"))]
-use std::sync::RwLock;
 use tokio::{
-    sync::Semaphore,
+    sync::{Mutex, MutexGuard},
     time::{sleep_until, Duration, Instant},
 };
 
@@ -17,77 +14,92 @@ struct LeakyBucketInner {
     /// Amount of tokens gained per interval.
     refill_amount: u32,
 
-    /// Current tokens in the bucket.
-    tokens: RwLock<u32>,
-    /// Last refill of the tokens.
-    last_refill: RwLock<Instant>,
+    locked: Mutex<LeakyBucketInnerLocked>,
+}
 
-    /// To prevent more than one task from acquiring at the same time,
-    /// a Semaphore is needed to guard access.
-    semaphore: Semaphore,
+#[derive(Debug)]
+struct LeakyBucketInnerLocked {
+    /// Current tokens in the bucket.
+    tokens: u32,
+    /// Last refill of the tokens.
+    last_refill: Instant,
 }
 
 impl LeakyBucketInner {
     fn new(max: u32, tokens: u32, refill_interval: Duration, refill_amount: u32) -> Self {
         Self {
-            tokens: RwLock::new(tokens),
             max,
             refill_interval,
             refill_amount,
-            last_refill: RwLock::new(Instant::now()),
-            semaphore: Semaphore::new(1),
+            locked: Mutex::new(LeakyBucketInnerLocked {
+                tokens,
+                last_refill: Instant::now(),
+            }),
         }
     }
 
     /// Updates the tokens in the leaky bucket and returns the current amount
     /// of tokens in the bucket.
     #[inline]
-    fn update_tokens(&self) -> u32 {
-        #[cfg(feature = "parking_lot")]
-        let mut last_refill = self.last_refill.write();
-        #[cfg(not(feature = "parking_lot"))]
-        let mut last_refill = self.last_refill.write().expect("RwLock poisoned");
-        #[cfg(feature = "parking_lot")]
-        let mut tokens = self.tokens.write();
-        #[cfg(not(feature = "parking_lot"))]
-        let mut tokens = self.tokens.write().expect("RwLock poisoned");
-
-        let time_passed = Instant::now() - *last_refill;
+    fn update_tokens(&self, locked: &mut MutexGuard<'_, LeakyBucketInnerLocked>) -> u32 {
+        let time_passed = Instant::now() - locked.last_refill;
 
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let refills_since =
             (time_passed.as_secs_f64() / self.refill_interval.as_secs_f64()).floor() as u32;
 
-        *tokens += self.refill_amount * refills_since;
-        *last_refill += self.refill_interval * refills_since;
+        locked.tokens += self.refill_amount * refills_since;
+        locked.last_refill += self.refill_interval * refills_since;
 
-        *tokens = tokens.min(self.max);
+        locked.tokens = locked.tokens.min(self.max);
 
-        *tokens
+        locked.tokens
     }
 
     #[inline]
-    fn tokens(&self) -> u32 {
-        self.update_tokens()
+    async fn tokens(&self) -> u32 {
+        self.update_tokens(&mut self.locked.lock().await)
     }
 
-    fn next_refill(&self) -> Instant {
-        self.update_tokens();
+    async fn next_refill(&self) -> Instant {
+        let mut locked = self.locked.lock().await;
+        self.update_tokens(&mut locked);
 
-        #[cfg(feature = "parking_lot")]
-        let last_refill = self.last_refill.read();
-        #[cfg(not(feature = "parking_lot"))]
-        let last_refill = self.last_refill.read().expect("RwLock poisoned");
-
-        *last_refill + self.refill_interval
+        locked.last_refill + self.refill_interval
     }
 
     async fn acquire(&self, amount: u32) {
-        // Make sure this is the only task accessing the tokens in a real
-        // "write" rather than "update" way.
-        let _permit = self.semaphore.acquire().await;
+        let mut locked = self.locked.lock().await;
+        if let Err(target_time) = self.try_acquire_locked(amount, &mut locked) {
+            sleep_until(target_time).await;
 
-        let current_tokens = self.update_tokens();
+            self.update_tokens(&mut locked);
+            locked.tokens -= amount;
+        }
+    }
+
+    fn try_acquire(&self, amount: u32) -> Result<(), TryAcquireError> {
+        self.try_acquire_locked(
+            amount,
+            &mut self
+                .locked
+                .try_lock()
+                .map_err(|_e| TryAcquireError::new_locked())?,
+        )
+        .map_err(|i| TryAcquireError::new_insufficient_tokens(i.into()))
+    }
+
+    fn try_acquire_locked(
+        &self,
+        amount: u32,
+        locked: &mut MutexGuard<'_, LeakyBucketInnerLocked>,
+    ) -> Result<(), Instant> {
+        assert!(
+            amount <= self.max,
+            "Acquiring more tokens than the configured maximum is not possible"
+        );
+
+        let current_tokens = self.update_tokens(locked);
 
         if current_tokens < amount {
             let tokens_needed = amount - current_tokens;
@@ -98,27 +110,10 @@ impl LeakyBucketInner {
                 refills_needed += 1;
             }
 
-            let target_time = {
-                #[cfg(feature = "parking_lot")]
-                let last_refill = self.last_refill.read();
-                #[cfg(not(feature = "parking_lot"))]
-                let last_refill = self.last_refill.read().expect("RwLock poisoned");
-
-                *last_refill + self.refill_interval * refills_needed
-            };
-
-            sleep_until(target_time).await;
-
-            self.update_tokens();
-        }
-
-        #[cfg(feature = "parking_lot")]
-        {
-            *self.tokens.write() -= amount;
-        }
-        #[cfg(not(feature = "parking_lot"))]
-        {
-            *self.tokens.write().expect("RwLock poisoned") -= amount;
+            Err(locked.last_refill + self.refill_interval * refills_needed)
+        } else {
+            locked.tokens -= amount;
+            Ok(())
         }
     }
 }
@@ -154,15 +149,13 @@ impl LeakyBucket {
     }
 
     /// Get the current number of tokens available.
-    #[must_use]
-    pub fn tokens(&self) -> u32 {
-        self.inner.tokens()
+    pub async fn tokens(&self) -> u32 {
+        self.inner.tokens().await
     }
 
     /// Get the next time at which the tokens will be refilled.
-    #[must_use]
-    pub fn next_refill(&self) -> Instant {
-        self.inner.next_refill()
+    pub async fn next_refill(&self) -> Instant {
+        self.inner.next_refill().await
     }
 
     /// Acquire a single token.
@@ -224,13 +217,93 @@ impl LeakyBucket {
     /// # Panics
     ///
     /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
     pub async fn acquire(&self, amount: u32) {
-        assert!(
-            amount <= self.max(),
-            "Acquiring more tokens than the configured maximum is not possible"
-        );
-
         self.inner.acquire(amount).await;
+    }
+
+    /// Try to acquire one token, without waiting for the internal lock.
+    ///
+    /// # Errors
+    ///
+    /// A [`TryAcquireError`] is returned if the operation can't be completed immediately.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use leaky_bucket_lite::LeakyBucket;
+    /// use std::time::Duration;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let rate_limiter = LeakyBucket::builder()
+    ///         .max(5)
+    ///         .tokens(1)
+    ///         .refill_interval(Duration::from_secs(1))
+    ///         .refill_amount(1)
+    ///         .build();
+    ///
+    ///     assert!(matches!(rate_limiter.try_acquire_one(), Ok(())));
+    ///     assert!(matches!(rate_limiter.try_acquire_one(), Err(e) if e.is_insufficient_tokens()));
+    ///     tokio::spawn({
+    ///         let rate_limiter = rate_limiter.clone();
+    ///         async move {
+    ///             rate_limiter.acquire(2).await;
+    ///         }
+    ///     });
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
+    ///     assert!(matches!(rate_limiter.try_acquire_one(), Err(e) if e.is_locked()));
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
+    pub fn try_acquire_one(&self) -> Result<(), TryAcquireError> {
+        self.try_acquire(1)
+    }
+
+    /// Try to acquire the given `amount` of tokens, without waiting for the internal lock.
+    ///
+    /// # Errors
+    ///
+    /// A [`TryAcquireError`] is returned if the operation can't be completed immediately.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use leaky_bucket_lite::LeakyBucket;
+    /// use std::time::Duration;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let rate_limiter = LeakyBucket::builder()
+    ///         .max(5)
+    ///         .tokens(1)
+    ///         .refill_interval(Duration::from_secs(1))
+    ///         .refill_amount(1)
+    ///         .build();
+    ///
+    ///     assert!(matches!(rate_limiter.try_acquire(1), Ok(())));
+    ///     assert!(matches!(rate_limiter.try_acquire(1), Err(e) if e.is_insufficient_tokens()));
+    ///     tokio::spawn({
+    ///         let rate_limiter = rate_limiter.clone();
+    ///         async move {
+    ///             rate_limiter.acquire(2).await;
+    ///         }
+    ///     });
+    ///     tokio::time::sleep(Duration::from_millis(100)).await;
+    ///     assert!(matches!(rate_limiter.try_acquire(1), Err(e) if e.is_locked()));
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic when acquiring more tokens than the configured maximum.
+    #[inline]
+    pub fn try_acquire(&self, amount: u32) -> Result<(), TryAcquireError> {
+        self.inner.try_acquire(amount)
     }
 }
 
