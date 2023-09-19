@@ -148,7 +148,7 @@ impl LeakyBucket {
         self.inner.max
     }
 
-    /// Get the refill_interval this rate limiter is configured for.
+    /// Get the refill interval this rate limiter is configured for.
     #[must_use]
     pub fn refill_interval(&self) -> Duration {
         self.inner.refill_interval
