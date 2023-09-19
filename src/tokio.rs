@@ -148,6 +148,12 @@ impl LeakyBucket {
         self.inner.max
     }
 
+    /// Get the refill interval this rate limiter is configured for.
+    #[must_use]
+    pub fn refill_interval(&self) -> Duration {
+        self.inner.refill_interval
+    }
+
     /// Get the current number of tokens available.
     pub async fn tokens(&self) -> u32 {
         self.inner.tokens().await
